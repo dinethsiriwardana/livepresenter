@@ -106,7 +106,7 @@ export default function NewPresentationPage() {
     try {
       // 1. Load pdfjs dynamically to prevent SSR issues
       const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       log("PDF engine loaded successfully.");
 
       // 2. Create entry in Firestore for the Presentation Template
