@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write access to user profiles for authenticated users
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Allow workspaces access for members
+    match /workspaces/{workspaceId} {
+      allow read, write: if request.auth != null && (
+        resource == null || 
+        resource.data.members[request.auth.uid] != null ||
+        request.auth.uid == resource.data.ownerId
+      );
+    }
+
+    // Allow presentations access for workspace members / owner
+    match /presentations/{presentationId} {
+      allow read, write: if request.auth != null;
+      
+      // Slides sub-collection
+      match /slides/{slideNumber} {
+        allow read: if true;
+        allow write: if request.auth != null;
+
+        // Interactions sub-collection
+        match /interactions/{interactionId} {
+          allow read: if true;
+          allow write: if request.auth != null;
+        }
+      }
+    }
+
+    // Allow anyone (including anonymous) to read/write sessions
+    match /sessions/{joinCode} {
+      allow read: if true;
+      allow write: if true;
+
+      // Responses sub-collection (anyone can submit response)
+      match /responses/{responseId} {
+        allow read: if true;
+        allow write: if true;
+      }
+
+      // Q&A sub-collection (anyone can post or upvote)
+      match /qna/{qnaId} {
+        allow read, write: if true;
+      }
+    }
+
+    // Analytics access for authorized hosts
+    match /analytics/{sessionId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
