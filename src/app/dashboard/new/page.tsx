@@ -88,7 +88,15 @@ export default function NewPresentationPage() {
 
     const log = (msg: string) => {
       const stamp = new Date().toLocaleTimeString();
-      setLogs((prev) => [...prev, `[${stamp}] ${msg}`]);
+      const logLine = `[${stamp}] ${msg}`;
+      setLogs((prev) => [...prev, logLine]);
+      
+      // Send log to the server console
+      fetch("/api/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: logLine }),
+      }).catch(() => {});
     };
 
     log("Initializing PDF processing engine...");
