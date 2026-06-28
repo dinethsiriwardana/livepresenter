@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# InteractDeck (Live Presenter)
 
-## Getting Started
+InteractDeck is a real-time audience engagement and presentation projection platform. Instead of recreating slides, presenters upload standard PDF decks which are rasterized into static slide images (**Static Content Plane**). The system then overlays interactive engagement widgets (Polls, Quizzes, Word Clouds, sticky notes, Q&A, and reaction emojis) synced instantly via a real-time JSON state stream (**Dynamic Event Plane**).
 
-First, run the development server:
+---
 
+## 🚀 Getting Started
+
+### 1. Installation
+
+Install the Node dependencies:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Run Locally (Using Firebase Local Emulators)
+For testing and development without cloud costs, the project supports the **Firebase Local Emulator Suite**.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Start the Firebase Emulators**:
+   In your terminal, run:
+   ```bash
+   npx firebase emulators:start
+   ```
+   *(This boots up the local console at [http://localhost:4000](http://localhost:4000) representing local Firestore, RTDB, Auth, and Storage).*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. **Toggle the Local Mode**:
+   Open `.env.local` and ensure the emulator flag is active:
+   ```env
+   NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true
+   ```
 
-## Learn More
+3. **Start the Next.js Dev Server**:
+   In a separate terminal, run:
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) to view the homepage.
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 🌐 Connecting to the Real Firebase Project (`interact-deck-90184`)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+To connect the application to the live Firebase production servers on Google Cloud:
 
-## Deploy on Vercel
+### Step 1: Configure Environment
+Open `.env.local` and set the emulator flag to `false`:
+```env
+NEXT_PUBLIC_USE_FIREBASE_EMULATORS=false
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Step 2: Enable Services on the Firebase Console
+Since the Firebase project was created programmatically, you must manually turn on the required database and login services:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Authentication**: Go to [Firebase Auth Providers](https://console.firebase.google.com/project/interact-deck-90184/authentication/providers):
+   - Enable **Anonymous** sign-in (required for audience participation).
+   - Enable **Email/Password** sign-in (for presenters).
+   - Enable **Google** sign-in (for Google presenter logins).
+2. **Firestore Database**: Go to [Cloud Firestore](https://console.firebase.google.com/project/interact-deck-90184/firestore) and click **Create database**. Select your preferred region and start in test mode (or production mode, as rules are deployed).
+3. **Realtime Database**: Go to [Realtime Database](https://console.firebase.google.com/project/interact-deck-90184/database) and click **Create database** (used for high-frequency reaction emojis and laser pointer coordinates).
+4. **Storage**: Go to [Cloud Storage](https://console.firebase.google.com/project/interact-deck-90184/storage) and click **Get Started** (used for rasterized PNG slide images).
+
+---
+
+## 📁 Project Structure
+
+- `src/lib/`: Firebase client (`firebaseClient.ts`) and server admin (`firebaseAdmin.ts`) SDK configurations.
+- `src/context/`: `AuthContext.tsx` providing Google, Email, and Anonymous state management.
+- `src/middleware.ts`: Next.js middleware protecting host `/dashboard` and `/editor` routes.
+- `src/app/`: Next.js App Router routing matrix:
+  - `/`: Main Landing Page.
+  - `/login`: Form for host sign-in and account registration.
+  - `/join`: Gateway page for audience members to enter room code.
+  - `/dashboard`: Workspace selection and presentation templates manager.
+  - `/dashboard/new`: Slide PDF uploader converting slides client-side to PNGs.
+  - `/editor/[deckId]`: Canvas editor displaying coordinate overlay builder.
+  - `/present/[sessionId]`: Presenter remote dashboard control panel.
+  - `/cast/[joinCode]`: Fullscreen cast projection overlaying aggregate charts, pointer locations, and reaction emojis.
+  - `/live/[joinCode]`: Participant dashboard with dynamic interaction modals and flying reaction buttons.
+  - `/analytics/[sessionId]`: Post-session recap dashboard exporting response logs to CSV.
+  - `/api/ai/`: Next.js route connecting to Gemini API (flash model) to auto-generate quizzes and cluster sticky notes.
