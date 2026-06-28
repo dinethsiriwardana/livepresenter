@@ -55,9 +55,16 @@ Since the Firebase project was created programmatically, you must manually turn 
    - Enable **Anonymous** sign-in (required for audience participation).
    - Enable **Email/Password** sign-in (for presenters).
    - Enable **Google** sign-in (for Google presenter logins).
-2. **Firestore Database**: Go to [Cloud Firestore](https://console.firebase.google.com/project/interact-deck-90184/firestore) and click **Create database**. Select your preferred region and start in test mode (or production mode, as rules are deployed).
-3. **Realtime Database**: Go to [Realtime Database](https://console.firebase.google.com/project/interact-deck-90184/database) and click **Create database** (used for high-frequency reaction emojis and laser pointer coordinates).
-4. **Storage**: Go to [Cloud Storage](https://console.firebase.google.com/project/interact-deck-90184/storage) and click **Get Started** (used for rasterized PNG slide images).
+2. **Firestore Database**: Go to [Cloud Firestore](https://console.firebase.google.com/project/interact-deck-90184/firestore) and click **Create database**. Select your preferred region and choose **Production Mode** (which is secure).
+3. **Realtime Database**: Go to [Realtime Database](https://console.firebase.google.com/project/interact-deck-90184/database) and click **Create database**.
+4. **Storage**: Go to [Cloud Storage](https://console.firebase.google.com/project/interact-deck-90184/storage) and click **Get Started**.
+
+### Step 3: Deploy Security Rules
+Once the databases and storage are initialized in the Firebase console, upload our secure configuration rules directly from the project directory by running:
+```bash
+npx firebase deploy --only firestore:rules,database,storage
+```
+This automatically configures correct read/write permissions for presenters and participants, overwriting the default locked-down settings.
 
 ---
 
