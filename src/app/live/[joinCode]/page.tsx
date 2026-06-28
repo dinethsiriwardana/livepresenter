@@ -412,7 +412,7 @@ export default function AudienceLivePage() {
                         {[1, 2, 3, 4, 5].map((val) => (
                           <button
                             key={val}
-                            type="button; button"
+                            type="button"
                             onClick={() => setRatingVal(val)}
                             disabled={submitting}
                             className="text-4xl text-slate-700 hover:scale-110 active:scale-100 transition-all focus:outline-none"

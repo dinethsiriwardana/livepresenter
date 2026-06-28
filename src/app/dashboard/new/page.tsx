@@ -136,7 +136,7 @@ export default function NewPresentationPage() {
         const highResCtx = highResCanvas.getContext("2d");
         
         if (!highResCtx) throw new Error("Could not create high resolution canvas context");
-        await page.render({ canvasContext: highResCtx, viewport: highResViewport }).promise;
+        await page.render({ canvasContext: highResCtx, viewport: highResViewport, canvas: highResCanvas }).promise;
         
         const highResBlob = await new Promise<Blob | null>((resolve) => {
           highResCanvas.toBlob((blob) => resolve(blob), "image/png");
@@ -151,7 +151,7 @@ export default function NewPresentationPage() {
         const thumbCtx = thumbCanvas.getContext("2d");
         
         if (!thumbCtx) throw new Error("Could not create thumbnail canvas context");
-        await page.render({ canvasContext: thumbCtx, viewport: thumbViewport }).promise;
+        await page.render({ canvasContext: thumbCtx, viewport: thumbViewport, canvas: thumbCanvas }).promise;
         
         const thumbBlob = await new Promise<Blob | null>((resolve) => {
           thumbCanvas.toBlob((blob) => resolve(blob), "image/png");

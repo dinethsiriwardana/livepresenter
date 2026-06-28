@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { 
   ArrowLeft, 
@@ -87,6 +88,54 @@ export default function SlideEditorPage() {
   const [newUrl, setNewUrl] = useState("");
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [generatingAi, setGeneratingAi] = useState(false);
+
+  const handleAiGenerateQuiz = async () => {
+    if (!deckId || !selectedSlideId || !slideNotes.trim()) {
+      alert("Please write some slide notes first so the AI can read them!");
+      return;
+    }
+
+    setGeneratingAi(true);
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate-questions",
+          payload: slideNotes
+        })
+      });
+
+      const resData = await response.json();
+      if (resData.success && resData.questions) {
+        const interactionsRef = collection(db, "presentations", deckId, "slides", selectedSlideId, "interactions");
+        
+        for (const [idx, q] of resData.questions.entries()) {
+          const x = 0.3 + (idx * 0.25);
+          const y = 0.55;
+          
+          await addDoc(interactionsRef, {
+            type: "quiz",
+            question: q.question,
+            position: { x, y },
+            config: {
+              options: q.options,
+              correctOptionIndex: q.correctOptionIndex
+            }
+          });
+        }
+        alert("AI generated questions placed on slide!");
+      } else {
+        throw new Error(resData.error || "Failed to generate questions");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Error generating AI quiz questions.");
+    } finally {
+      setGeneratingAi(false);
+    }
+  };
 
   // Redirect if not logged in
   useEffect(() => {
@@ -478,13 +527,28 @@ export default function SlideEditorPage() {
                 />
               </div>
 
-              <button
-                onClick={handleSaveNotes}
-                className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 font-semibold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-1.5"
-              >
-                <Save className="h-4 w-4" />
-                Save Slide Notes
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleSaveNotes}
+                  className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 font-semibold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Save className="h-4 w-4" />
+                  Save Slide Notes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAiGenerateQuiz}
+                  disabled={generatingAi || !slideNotes.trim()}
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-750 hover:to-indigo-750 text-white font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  {generatingAi ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "🪄 AI Generate Quiz Questions"
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </aside>

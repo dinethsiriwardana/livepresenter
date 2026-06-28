@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Mail, Lock, User, Chrome, ArrowRight, Presentation } from "lucide-react";
+import { Mail, Lock, User, Globe, ArrowRight, Presentation } from "lucide-react";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -167,7 +167,7 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full border border-slate-800 hover:border-slate-700 bg-slate-950/40 text-slate-300 rounded-xl py-3 font-medium text-sm transition-all flex items-center justify-center gap-2"
           >
-            <Chrome className="h-4 w-4 text-red-400" />
+            <Globe className="h-4 w-4 text-indigo-400" />
             Google Workspace
           </button>
 
