@@ -20,6 +20,11 @@ export default function NewPresentationPage() {
   const [success, setSuccess] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
 
+  // Advanced progress logging states
+  const [logs, setLogs] = useState<string[]>([]);
+  const [percentCompleted, setPercentCompleted] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch default workspace ID
@@ -77,12 +82,24 @@ export default function NewPresentationPage() {
 
     setLoading(true);
     setError("");
+    setPercentCompleted(0);
+    setEtaSeconds(null);
+    setLogs([]);
+
+    const log = (msg: string) => {
+      const stamp = new Date().toLocaleTimeString();
+      setLogs((prev) => [...prev, `[${stamp}] ${msg}`]);
+    };
+
+    log("Initializing PDF processing engine...");
     setProgress("Initializing PDF engine...");
+    const startTime = Date.now();
 
     try {
       // 1. Load pdfjs dynamically to prevent SSR issues
       const pdfjsLib = await import("pdfjs-dist");
       pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      log("PDF engine loaded successfully.");
 
       // 2. Create entry in Firestore for the Presentation Template
       const presentationTitle = file.name.replace(/\.pdf$/i, "");
@@ -90,8 +107,10 @@ export default function NewPresentationPage() {
       
       const newDeckRef = doc(presentationsRef);
       const deckId = newDeckRef.id;
+      log(`Generated presentation template entry with ID: ${deckId}`);
 
       // 3. Read PDF file as ArrayBuffer
+      log("Reading PDF file into memory...");
       setProgress("Reading PDF file...");
       const fileReader = new FileReader();
       
@@ -100,18 +119,22 @@ export default function NewPresentationPage() {
         fileReader.onerror = () => reject(new Error("Failed to read PDF file"));
         fileReader.readAsArrayBuffer(file);
       });
+      log(`Read ${file.size} bytes successfully.`);
 
       // 4. Load PDF document
+      log("Parsing PDF pages...");
       setProgress("Loading PDF document pages...");
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdfDoc = await loadingTask.promise;
       const numPages = pdfDoc.numPages;
+      log(`PDF successfully parsed. Total pages: ${numPages}`);
 
       if (numPages === 0) {
         throw new Error("The uploaded PDF is empty.");
       }
 
       // Initialize the presentation entry in "processing" state
+      log("Initializing document record in Cloud Firestore...");
       await setDoc(newDeckRef, {
         workspaceId: activeWorkspaceId,
         title: presentationTitle,
@@ -124,6 +147,7 @@ export default function NewPresentationPage() {
 
       // 5. Convert each page to high-res PNG and thumbnail
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        log(`Processing slide ${pageNum} of ${numPages}...`);
         setProgress(`Processing page ${pageNum} of ${numPages}...`);
         
         const page = await pdfDoc.getPage(pageNum);
@@ -142,6 +166,7 @@ export default function NewPresentationPage() {
           highResCanvas.toBlob((blob) => resolve(blob), "image/png");
         });
         if (!highResBlob) throw new Error(`Failed to generate high-res image for slide ${pageNum}`);
+        log(`Slide ${pageNum} high-res PNG rasterized.`);
 
         // Render low-res thumbnail (scale 0.4)
         const thumbViewport = page.getViewport({ scale: 0.4 });
@@ -157,8 +182,10 @@ export default function NewPresentationPage() {
           thumbCanvas.toBlob((blob) => resolve(blob), "image/png");
         });
         if (!thumbBlob) throw new Error(`Failed to generate thumbnail for slide ${pageNum}`);
+        log(`Slide ${pageNum} low-res preview generated.`);
 
         // Upload both to Storage
+        log(`Uploading page ${pageNum} assets to Cloud Storage...`);
         setProgress(`Uploading images for page ${pageNum}...`);
         const slideRef = ref(storage, `slides/${deckId}/slide_${pageNum}.png`);
         const thumbRef = ref(storage, `thumbnails/${deckId}/thumb_${pageNum}.png`);
@@ -172,21 +199,36 @@ export default function NewPresentationPage() {
         const aspectRatio = highResViewport.width / highResViewport.height;
 
         // Save individual slide metadata in Firestore sub-collection
+        log(`Saving slide ${pageNum} metadata to Firestore...`);
         await setDoc(doc(db, "presentations", deckId, "slides", pageNum.toString()), {
           imageUrl: slideUrl,
           thumbnailUrl: thumbUrl,
           aspectRatio: aspectRatio,
           notes: "",
         });
+
+        // Update progress percentages & ETA
+        const currentPercent = Math.round((pageNum / numPages) * 100);
+        setPercentCompleted(currentPercent);
+
+        const elapsedMs = Date.now() - startTime;
+        const avgMsPerPage = elapsedMs / pageNum;
+        const remainingPages = numPages - pageNum;
+        const remainingMs = avgMsPerPage * remainingPages;
+        setEtaSeconds(Math.max(Math.round(remainingMs / 1000), 0));
+        
+        log(`Slide ${pageNum} processed successfully (${currentPercent}% completed).`);
       }
 
       // 6. Complete upload status update
+      log("All pages processed. Finalizing presentation status...");
       setProgress("Finalizing presentation configuration...");
       await setDoc(newDeckRef, {
         status: "ready",
         updatedAt: serverTimestamp(),
       }, { merge: true });
 
+      log("Presentation successfully created! Redirecting...");
       setSuccess(true);
       setTimeout(() => {
         router.push("/dashboard");
@@ -194,6 +236,7 @@ export default function NewPresentationPage() {
 
     } catch (err: any) {
       console.error(err);
+      log(`Error encountered: ${err.message || "Unknown error"}`);
       setError(err.message || "An error occurred during PDF processing.");
     } finally {
       setLoading(false);
@@ -236,12 +279,46 @@ export default function NewPresentationPage() {
               </div>
             </div>
           ) : loading ? (
-            <div className="py-12 flex flex-col items-center justify-center text-center gap-4">
-              <Loader2 className="h-12 w-12 text-indigo-500 animate-spin" />
-              <div>
-                <h3 className="text-lg font-semibold text-slate-200">Processing Presentation</h3>
-                <p className="text-sm text-indigo-400 font-medium mt-2">{progress}</p>
-                <p className="text-xs text-slate-555 mt-1">Please keep this window open while processing.</p>
+            <div className="py-6 flex flex-col justify-center gap-6">
+              <div className="flex items-center justify-center gap-4">
+                <Loader2 className="h-10 w-10 text-indigo-500 animate-spin" />
+                <div className="text-left">
+                  <h3 className="text-lg font-semibold text-slate-200">Processing Presentation</h3>
+                  <p className="text-sm text-indigo-400 font-medium">{progress}</p>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-semibold text-slate-400">
+                  <span>Progress</span>
+                  <span>{percentCompleted}%</span>
+                </div>
+                <div className="w-full bg-slate-950 border border-slate-850 h-3 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-650 transition-all duration-300" 
+                    style={{ width: `${percentCompleted}%` }}
+                  />
+                </div>
+                {etaSeconds !== null && etaSeconds > 0 && (
+                  <div className="text-right text-xs text-slate-500">
+                    Estimated time remaining: <span className="font-bold text-slate-400">{etaSeconds}s</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Log Console */}
+              <div className="space-y-1.5 text-left">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Processing Logs
+                </span>
+                <div className="w-full h-40 bg-slate-950 border border-slate-850 rounded-xl p-3 font-mono text-[10px] text-slate-400 overflow-y-auto space-y-1 scrollbar-thin">
+                  {logs.map((logStr, idx) => (
+                    <div key={idx} className="leading-relaxed">
+                      {logStr}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
