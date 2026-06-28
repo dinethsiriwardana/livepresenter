@@ -62,12 +62,15 @@ export default function NewPresentationPage() {
   };
 
   const validateAndSetFile = (selectedFile: File) => {
-    if (selectedFile.type !== "application/pdf" && !selectedFile.name.endsWith(".pdf")) {
-      setError("Please upload a PDF file.");
+    const isPdf = selectedFile.type === "application/pdf" || selectedFile.name.endsWith(".pdf");
+    const isZip = selectedFile.type === "application/zip" || selectedFile.type === "application/x-zip-compressed" || selectedFile.name.endsWith(".zip");
+    
+    if (!isPdf && !isZip) {
+      setError("Please upload a PDF file or a processed ZIP package.");
       return;
     }
-    if (selectedFile.size > 50 * 1024 * 1024) {
-      setError("PDF size exceeds 50MB limit.");
+    if (selectedFile.size > 100 * 1024 * 1024) {
+      setError("File size exceeds 100MB limit.");
       return;
     }
     setFile(selectedFile);
@@ -99,9 +102,127 @@ export default function NewPresentationPage() {
       }).catch(() => {});
     };
 
+    const startTime = Date.now();
+    const isZip = file.name.endsWith(".zip");
+
+    if (isZip) {
+      log("Initializing client-side ZIP extractor...");
+      setProgress("Extracting presentation ZIP package...");
+      try {
+        const JSZip = (await import("jszip")).default;
+        const zip = await JSZip.loadAsync(file);
+
+        const metadataFile = zip.file("metadata.json");
+        if (!metadataFile) {
+          throw new Error("Invalid zip package: 'metadata.json' not found inside the ZIP.");
+        }
+
+        log("Reading 'metadata.json' config...");
+        const metadataContent = await metadataFile.async("string");
+        const metadata = JSON.parse(metadataContent);
+
+        const { title, slideCount, slides } = metadata;
+        if (!title || !slideCount || !slides || !Array.isArray(slides)) {
+          throw new Error("Invalid 'metadata.json' schema format.");
+        }
+
+        log(`ZIP verified successfully. Title: "${title}", Slides: ${slideCount}`);
+
+        const presentationsRef = collection(db, "presentations");
+        const newDeckRef = doc(presentationsRef);
+        const deckId = newDeckRef.id;
+        log(`Provisioning template ID: ${deckId} in Firestore`);
+
+        await setDoc(newDeckRef, {
+          workspaceId: activeWorkspaceId,
+          title: title,
+          ownerId: user.uid,
+          slideCount: slideCount,
+          status: "processing",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        for (let i = 0; i < slides.length; i++) {
+          const slide = slides[i];
+          const pageNum = slide.pageNum;
+          log(`Extracting slide ${pageNum} of ${slideCount}...`);
+          setProgress(`Processing slide ${pageNum} of ${slideCount}...`);
+
+          const imageFileInZip = zip.file(slide.imageName);
+          const thumbFileInZip = zip.file(slide.thumbName);
+
+          if (!imageFileInZip || !thumbFileInZip) {
+            throw new Error(`Missing asset files for page ${pageNum} in the ZIP.`);
+          }
+
+          const imageBlob = await imageFileInZip.async("blob");
+          const thumbBlob = await thumbFileInZip.async("blob");
+
+          // Determine MIME Type based on filename
+          const isJpg = slide.imageName.endsWith(".jpg") || slide.imageName.endsWith(".jpeg");
+          const imageType = isJpg ? "image/jpeg" : "image/png";
+          const finalImageBlob = imageBlob.slice(0, imageBlob.size, imageType);
+          const finalThumbBlob = thumbBlob.slice(0, thumbBlob.size, "image/png");
+
+          log(`Uploading slide ${pageNum} images to Storage...`);
+          setProgress(`Uploading images for page ${pageNum}...`);
+
+          const slideExt = isJpg ? "jpg" : "png";
+          const slideRef = ref(storage, `slides/${deckId}/slide_${pageNum}.${slideExt}`);
+          const thumbRef = ref(storage, `thumbnails/${deckId}/thumb_${pageNum}.png`);
+
+          await uploadBytes(slideRef, finalImageBlob);
+          await uploadBytes(thumbRef, finalThumbBlob);
+
+          const slideUrl = await getDownloadURL(slideRef);
+          const thumbUrl = await getDownloadURL(thumbRef);
+
+          log(`Saving slide ${pageNum} metadata to Firestore...`);
+          await setDoc(doc(db, "presentations", deckId, "slides", pageNum.toString()), {
+            imageUrl: slideUrl,
+            thumbnailUrl: thumbUrl,
+            aspectRatio: slide.aspectRatio || 1.3333,
+            notes: "",
+          });
+
+          const currentPercent = Math.round((pageNum / slideCount) * 100);
+          setPercentCompleted(currentPercent);
+
+          const elapsedMs = Date.now() - startTime;
+          const avgMsPerPage = elapsedMs / pageNum;
+          const remainingPages = slideCount - pageNum;
+          const remainingMs = avgMsPerPage * remainingPages;
+          setEtaSeconds(Math.max(Math.round(remainingMs / 1000), 0));
+
+          log(`Slide ${pageNum} processed successfully (${currentPercent}% completed).`);
+        }
+
+        log("All assets processed. Finalizing presentation configuration...");
+        setProgress("Finalizing presentation configuration...");
+        await setDoc(newDeckRef, {
+          status: "ready",
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+
+        log("Presentation successfully created! Redirecting to dashboard...");
+        setSuccess(true);
+        setTimeout(() => {
+          router.push("/dashboard");
+        }, 1500);
+
+      } catch (err: any) {
+        console.error(err);
+        log(`Error processing ZIP: ${err.message || "Unknown error"}`);
+        setError(err.message || "An error occurred during ZIP processing.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     log("Initializing PDF processing engine...");
     setProgress("Initializing PDF engine...");
-    const startTime = Date.now();
 
     try {
       // 1. Load pdfjs dynamically to prevent SSR issues
@@ -342,7 +463,7 @@ export default function NewPresentationPage() {
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept=".pdf"
+                  accept=".pdf,.zip"
                   className="hidden"
                 />
 
@@ -363,19 +484,39 @@ export default function NewPresentationPage() {
                 ) : (
                   <div>
                     <p className="text-sm font-semibold text-slate-350">
-                      Drag & drop your presentation PDF, or <span className="text-indigo-400">browse</span>
+                      Drag & drop your presentation PDF or processed ZIP, or <span className="text-indigo-400">browse</span>
                     </p>
                     <p className="text-xs text-slate-555 mt-1.5">
-                      Supports PDF up to 50MB
+                      Supports PDF or ZIP up to 100MB
                     </p>
                   </div>
                 )}
               </div>
 
+              {/* Local Offline Processor Promotion Box */}
+              <div className="bg-slate-950/60 border border-slate-850 rounded-2xl p-4 flex items-start gap-3.5 text-left">
+                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl mt-0.5">
+                  <File className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-slate-200">Heavy Presentation? Pre-process Offline</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Convert large slides locally to bypass browser CPU loads, save bandwidth, and upload a processed ZIP file instantly.
+                  </p>
+                  <a 
+                    href="/local-processor.zip" 
+                    download
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-all mt-1 hover:underline"
+                  >
+                    📥 Download Local Converter Package (Mac/Windows/Linux)
+                  </a>
+                </div>
+              </div>
+
               <button
                 type="submit"
                 disabled={!file}
-                className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl py-3.5 font-semibold text-sm transition-all shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                className="w-full bg-gradient-to-r from-indigo-500 to-purple-650 hover:from-indigo-600 hover:to-purple-750 text-white rounded-xl py-3.5 font-semibold text-sm transition-all shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
               >
                 Start Processing Deck
               </button>
