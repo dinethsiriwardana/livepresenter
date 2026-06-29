@@ -21,7 +21,8 @@ import {
   Type,
   Video,
   PenTool,
-  Loader2
+  Loader2,
+  Sparkles
 } from "lucide-react";
 import { 
   doc, 
@@ -43,6 +44,8 @@ interface Slide {
   thumbnailUrl: string;
   aspectRatio: number;
   notes: string;
+  isInteractive?: boolean;
+  interactionType?: string;
 }
 
 interface Interaction {
@@ -89,6 +92,121 @@ export default function SlideEditorPage() {
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [generatingAi, setGeneratingAi] = useState(false);
+
+  // Standalone Custom Slide states
+  const [isAddSlideModalOpen, setIsAddSlideModalOpen] = useState(false);
+  const [newSlideType, setNewSlideType] = useState<"content" | "interactive">("content");
+  const [newSlideImage, setNewSlideImage] = useState<File | null>(null);
+  const [newInteractiveType, setNewInteractiveType] = useState<string>("poll");
+  const [newSlideQuestion, setNewSlideQuestion] = useState("");
+  const [newSlideOptions, setNewSlideOptions] = useState<string[]>(["Option A", "Option B"]);
+  const [addingSlide, setAddingSlide] = useState(false);
+
+  const handleAddSlide = async () => {
+    if (newSlideType === "content" && !newSlideImage) {
+      alert("Please select a slide image to upload.");
+      return;
+    }
+    if (newSlideType === "interactive" && !newSlideQuestion.trim()) {
+      alert("Please enter a question prompt.");
+      return;
+    }
+
+    setAddingSlide(true);
+    try {
+      const newIndex = slides.length + 1;
+      const newSlideId = newIndex.toString();
+      const slideDocRef = doc(db, "presentations", deckId, "slides", newSlideId);
+
+      let imageUrl = "";
+      let thumbnailUrl = "";
+      let isInteractive = false;
+      let interactionType = "";
+
+      if (newSlideType === "content" && newSlideImage) {
+        // Upload slide image to Firebase Storage
+        const { ref: storageRef, uploadBytes, getDownloadURL } = await import("firebase/storage");
+        const { storage } = await import("@/lib/firebaseClient");
+
+        const slideRef = storageRef(storage, `slides/${deckId}/slide_${newSlideId}.png`);
+        const thumbRef = storageRef(storage, `thumbnails/${deckId}/thumb_${newSlideId}.png`);
+
+        await uploadBytes(slideRef, newSlideImage);
+        await uploadBytes(thumbRef, newSlideImage);
+
+        imageUrl = await getDownloadURL(slideRef);
+        thumbnailUrl = await getDownloadURL(thumbRef);
+      } else {
+        // Standalone Interactive Interface Slide
+        isInteractive = true;
+        interactionType = newInteractiveType;
+        imageUrl = ""; // interactive slides render direct HTML/CSS gradients
+        thumbnailUrl = "/next.svg";
+      }
+
+      // 1. Create the slide document
+      const { setDoc } = await import("firebase/firestore");
+      await setDoc(slideDocRef, {
+        imageUrl,
+        thumbnailUrl,
+        aspectRatio: 1.7778, // default 16:9
+        notes: newSlideType === "interactive" ? `Interactive ${newInteractiveType}: ${newSlideQuestion}` : "",
+        isInteractive,
+        interactionType
+      });
+
+      // 2. If it's interactive, provision the primary interaction sub-document
+      if (isInteractive) {
+        const primaryInteractRef = doc(db, "presentations", deckId, "slides", newSlideId, "interactions", "primary");
+        const defaultPosition = { x: 0.5, y: 0.5 };
+        
+        let configObj: any = {};
+        if (newInteractiveType === "poll" || newInteractiveType === "quiz") {
+          configObj = {
+            options: newSlideOptions.filter(o => o.trim() !== ""),
+            correctOptionIndex: newInteractiveType === "quiz" ? 0 : null,
+            durationSeconds: 30
+          };
+        } else if (newInteractiveType === "wordcloud" || newInteractiveType === "opentext") {
+          configObj = {
+            durationSeconds: 60
+          };
+        } else if (newInteractiveType === "rating") {
+          configObj = {
+            iconType: "star",
+            scaleMax: 5
+          };
+        }
+
+        await setDoc(primaryInteractRef, {
+          type: newInteractiveType,
+          question: newSlideQuestion,
+          position: defaultPosition,
+          config: configObj
+        });
+      }
+
+      // 3. Increment total slide count in the presentation document
+      const { updateDoc } = await import("firebase/firestore");
+      const deckDocRef = doc(db, "presentations", deckId);
+      await updateDoc(deckDocRef, {
+        slideCount: newIndex
+      });
+
+      setIsAddSlideModalOpen(false);
+      setSelectedSlideId(newSlideId);
+      setNewSlideQuestion("");
+      setNewSlideOptions(["Option A", "Option B"]);
+      setNewSlideImage(null);
+      alert("New slide added successfully!");
+
+    } catch (err: any) {
+      console.error(err);
+      alert("Error adding slide: " + err.message);
+    } finally {
+      setAddingSlide(false);
+    }
+  };
 
   const handleAiGenerateQuiz = async () => {
     if (!deckId || !selectedSlideId || !slideNotes.trim()) {
@@ -302,11 +420,11 @@ export default function SlideEditorPage() {
       {/* Editor Body */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Thumbnails Panel (20% width) */}
-        <aside className="w-56 border-r border-slate-900 bg-slate-900/10 flex flex-col overflow-y-auto p-4 gap-3 select-none">
+        <aside className="w-56 border-r border-slate-900 bg-slate-900/10 flex flex-col p-4 gap-3 select-none">
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             Slides Layout ({slides.length})
           </div>
-          <div className="space-y-3">
+          <div className="flex-1 overflow-y-auto space-y-3 scrollbar-thin pr-1">
             {slides.map((slide, index) => (
               <button
                 key={slide.id}
@@ -330,6 +448,14 @@ export default function SlideEditorPage() {
               </button>
             ))}
           </div>
+          
+          <button
+            onClick={() => setIsAddSlideModalOpen(true)}
+            className="w-full mt-2 py-3 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-98 shadow-md shadow-indigo-600/10"
+          >
+            <Plus className="h-4 w-4" />
+            Add Custom Slide
+          </button>
         </aside>
 
         {/* Center Sandbox Canvas Workspace (60% width) */}
@@ -350,11 +476,30 @@ export default function SlideEditorPage() {
               }}
             >
               {/* Background Slide Image */}
-              <img
-                src={activeSlide.imageUrl}
-                alt="Active Slide Preview"
-                className="w-full h-full object-contain pointer-events-none select-none"
-              />
+              {activeSlide.isInteractive ? (
+                <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 flex flex-col items-center justify-center text-center p-8 select-none pointer-events-none">
+                  <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                    {activeSlide.interactionType === "poll" && <BarChart2 className="h-6 w-6" />}
+                    {activeSlide.interactionType === "quiz" && <HelpCircle className="h-6 w-6" />}
+                    {activeSlide.interactionType === "wordcloud" && <Sparkles className="h-6 w-6 animate-pulse" />}
+                    {activeSlide.interactionType === "opentext" && <MessageSquare className="h-6 w-6" />}
+                    {activeSlide.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-450 fill-yellow-450" />}
+                    <span className="text-xs font-bold tracking-widest uppercase">{activeSlide.interactionType} SLIDE</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-100 max-w-lg leading-snug drop-shadow-md">
+                    {interactions[0]?.question || "Interactive Question Slide"}
+                  </h3>
+                  <div className="mt-4 text-[10px] text-indigo-300 font-semibold uppercase bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full">
+                    Auto-Activates Fullscreen on Present
+                  </div>
+                </div>
+              ) : (
+                <img
+                  src={activeSlide.imageUrl}
+                  alt="Active Slide Preview"
+                  className="w-full h-full object-contain pointer-events-none select-none"
+                />
+              )}
 
               {/* Overlaid Interaction Badges */}
               {interactions.map((inter) => {
@@ -700,6 +845,160 @@ export default function SlideEditorPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Standalone Slide Modal */}
+      {isAddSlideModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-850 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl relative">
+            <h3 className="text-lg font-bold text-slate-100">Add New Slide</h3>
+
+            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-850">
+              <button
+                type="button"
+                onClick={() => setNewSlideType("content")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  newSlideType === "content"
+                    ? "bg-slate-900 text-slate-100"
+                    : "text-slate-500 hover:text-slate-400"
+                }`}
+              >
+                Content Slide (Image)
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewSlideType("interactive")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                  newSlideType === "interactive"
+                    ? "bg-slate-900 text-slate-100"
+                    : "text-slate-500 hover:text-slate-400"
+                }`}
+              >
+                Interactive Slide
+              </button>
+            </div>
+
+            {newSlideType === "content" ? (
+              <div className="space-y-3">
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                  Slide Image File
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      setNewSlideImage(e.target.files[0]);
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-slate-350 text-xs focus:outline-none"
+                />
+                <p className="text-[10px] text-slate-555 leading-relaxed">
+                  Select a standard slide PNG or JPG to insert at the end of the presentation.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Interaction Type
+                  </label>
+                  <select
+                    value={newInteractiveType}
+                    onChange={(e) => setNewInteractiveType(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2 px-3 text-slate-200 text-xs focus:outline-none"
+                  >
+                    <option value="poll">Live Poll (Bar Chart)</option>
+                    <option value="quiz">Live Quiz (Trivia MCQ)</option>
+                    <option value="wordcloud">Word Cloud</option>
+                    <option value="opentext">Open Text (Sticky Notes)</option>
+                    <option value="rating">Star Rating Scale</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Question / Prompt Text
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. What is your favorite backend stack?"
+                    value={newSlideQuestion}
+                    onChange={(e) => setNewSlideQuestion(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl py-2 px-3 text-slate-200 text-xs focus:outline-none"
+                  />
+                </div>
+
+                {(newInteractiveType === "poll" || newInteractiveType === "quiz") && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                      Options
+                    </label>
+                    <div className="space-y-2 max-h-36 overflow-y-auto">
+                      {newSlideOptions.map((opt, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            required
+                            placeholder={`Option ${idx + 1}`}
+                            value={opt}
+                            onChange={(e) => {
+                              const copy = [...newSlideOptions];
+                              copy[idx] = e.target.value;
+                              setNewSlideOptions(copy);
+                            }}
+                            className="flex-1 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs text-slate-250 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewSlideOptions(newSlideOptions.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-500 text-xs p-1"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNewSlideOptions([...newSlideOptions, ""])}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 mt-1"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add Choice
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-4 border-t border-slate-850">
+              <button
+                type="button"
+                disabled={addingSlide}
+                onClick={() => setIsAddSlideModalOpen(false)}
+                className="flex-1 border border-slate-850 hover:border-slate-800 text-slate-400 hover:text-slate-250 py-2.5 rounded-xl text-xs font-semibold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={addingSlide}
+                onClick={handleAddSlide}
+                className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-650 hover:from-indigo-600 hover:to-purple-750 text-white py-2.5 rounded-xl text-xs font-semibold transition-all shadow-md shadow-indigo-650/15 flex items-center justify-center gap-1.5"
+              >
+                {addingSlide ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  "Create Slide"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

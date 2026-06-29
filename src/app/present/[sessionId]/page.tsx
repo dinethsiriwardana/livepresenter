@@ -49,6 +49,8 @@ interface Slide {
   imageUrl: string;
   thumbnailUrl: string;
   notes: string;
+  isInteractive?: boolean;
+  interactionType?: string;
 }
 
 interface Interaction {
@@ -138,17 +140,23 @@ export default function PresenterRemotePage() {
 
   const handleNextSlide = () => {
     if (!session || session.currentSlide >= slides.length) return;
+    const targetIdx = session.currentSlide; // 0-indexed next index
+    const nextSlide = slides[targetIdx];
+    const autoInteractId = (nextSlide && nextSlide.isInteractive) ? "primary" : null;
     updateSession({ 
       currentSlide: session.currentSlide + 1,
-      activeInteractionId: null // Reset active interaction on slide change
+      activeInteractionId: autoInteractId
     });
   };
 
   const handlePrevSlide = () => {
     if (!session || session.currentSlide <= 1) return;
+    const targetIdx = session.currentSlide - 2; // 0-indexed prev index
+    const prevSlide = slides[targetIdx];
+    const autoInteractId = (prevSlide && prevSlide.isInteractive) ? "primary" : null;
     updateSession({ 
       currentSlide: session.currentSlide - 1,
-      activeInteractionId: null 
+      activeInteractionId: autoInteractId
     });
   };
 
@@ -280,7 +288,11 @@ export default function PresenterRemotePage() {
               {slides.map((s, idx) => (
                 <button
                   key={s.id}
-                  onClick={() => updateSession({ currentSlide: idx + 1, activeInteractionId: null })}
+                  onClick={() => {
+                    const targetSlide = slides[idx];
+                    const autoInteractId = (targetSlide && targetSlide.isInteractive) ? "primary" : null;
+                    updateSession({ currentSlide: idx + 1, activeInteractionId: autoInteractId });
+                  }}
                   className={`aspect-square rounded-xl text-xs font-extrabold transition-all border flex items-center justify-center ${
                     session.currentSlide === idx + 1
                       ? "bg-indigo-500 text-white border-indigo-400"

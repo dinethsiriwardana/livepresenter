@@ -76,6 +76,10 @@ export default function AudienceLivePage() {
   const [textVal, setTextVal] = useState("");
   const [ratingVal, setRatingVal] = useState(0);
 
+  // Active slide details & responses aggregation
+  const [activeSlide, setActiveSlide] = useState<{ imageUrl?: string; isInteractive?: boolean } | null>(null);
+  const [responses, setResponses] = useState<any[]>([]);
+
   // Check anonymous participant state
   useEffect(() => {
     if (authLoading) return;
@@ -156,6 +160,71 @@ export default function AudienceLivePage() {
 
     return () => unsubInteract();
   }, [session?.activeInteractionId, session?.currentSlide, session?.presentationId, joinCode, user]);
+
+  // Listen to Active Slide Details
+  useEffect(() => {
+    if (!session || !session.presentationId || !session.currentSlide) {
+      setActiveSlide(null);
+      return;
+    }
+
+    const slideRef = doc(db, "presentations", session.presentationId, "slides", session.currentSlide.toString());
+    const unsubSlide = onSnapshot(slideRef, (snap) => {
+      if (snap.exists()) {
+        setActiveSlide(snap.data());
+      } else {
+        setActiveSlide(null);
+      }
+    });
+
+    return () => unsubSlide();
+  }, [session?.presentationId, session?.currentSlide]);
+
+  // Listen to Responses for the active interaction
+  useEffect(() => {
+    if (!joinCode || !session?.activeInteractionId) {
+      setResponses([]);
+      return;
+    }
+
+    const responsesRef = collection(db, "sessions", joinCode, "responses");
+    const q = query(responsesRef, where("interactionId", "==", session.activeInteractionId));
+    
+    const unsubResponses = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setResponses(list);
+    });
+
+    return () => unsubResponses();
+  }, [joinCode, session?.activeInteractionId]);
+
+  // Compute tallies and word frequency
+  const aggregatedTallies = React.useMemo(() => {
+    if (!activeInteraction || !activeInteraction.config?.options) return [];
+    const options = activeInteraction.config.options as string[];
+    const tallies = options.map((opt, idx) => {
+      const count = responses.filter(r => Number(r.value) === idx).length;
+      return { option: opt, index: idx, count };
+    });
+    const total = tallies.reduce((sum, t) => sum + t.count, 0);
+    return tallies.map(t => ({
+      ...t,
+      percent: total > 0 ? Math.round((t.count / total) * 100) : 0
+    }));
+  }, [activeInteraction, responses]);
+
+  const wordCloudWords = React.useMemo(() => {
+    const words: Record<string, number> = {};
+    responses.forEach(r => {
+      const w = String(r.value || "").trim().toLowerCase();
+      if (w) {
+        words[w] = (words[w] || 0) + 1;
+      }
+    });
+    return Object.entries(words)
+      .map(([text, count]) => ({ text, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [responses]);
 
   // Listen to Q&A List
   useEffect(() => {
@@ -312,7 +381,22 @@ export default function AudienceLivePage() {
       <main className="flex-1 max-w-md w-full mx-auto px-6 py-6 flex flex-col justify-start overflow-y-auto max-h-[calc(100vh-170px)]">
         {activeTab === "presentation" ? (
           /* Presentation & Interactive Question tab */
-          <div className="flex-1 flex flex-col justify-center">
+          <div className="flex-1 flex flex-col justify-start">
+            {/* Live Slide Preview Card */}
+            {activeSlide && !activeSlide.isInteractive && activeSlide.imageUrl && (
+              <div className="w-full aspect-[16/9] relative rounded-2xl overflow-hidden border border-slate-800 bg-black mb-4 shadow-lg">
+                <img 
+                  src={activeSlide.imageUrl} 
+                  alt="Live Slide Preview" 
+                  className="w-full h-full object-contain pointer-events-none select-none"
+                />
+                <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-[9px] font-bold text-slate-350 tracking-wider flex items-center gap-1.5 border border-slate-850">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                  LIVE SLIDE {session.currentSlide}
+                </div>
+              </div>
+            )}
+
             {!activeInteraction ? (
               <div className="text-center py-12 px-6 bg-slate-900/40 backdrop-blur-sm border border-slate-850 rounded-3xl space-y-4">
                 <div className="p-4 bg-slate-950 border border-slate-900 rounded-2xl w-fit mx-auto text-indigo-505 animate-pulse">
@@ -324,14 +408,112 @@ export default function AudienceLivePage() {
                 </p>
               </div>
             ) : hasSubmitted ? (
-              <div className="text-center py-12 px-6 bg-slate-900/40 backdrop-blur-sm border border-slate-850 rounded-3xl space-y-4">
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl w-fit mx-auto text-emerald-450">
-                  <CheckCircle className="h-8 w-8" />
+              <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-850 rounded-3xl p-6 shadow-xl space-y-6">
+                <div className="text-center">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl w-fit mx-auto text-emerald-450 mb-3">
+                    <CheckCircle className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-200">Response Registered!</h3>
+                  <p className="text-xs text-slate-500 mt-1">Showing real-time results below</p>
                 </div>
-                <h3 className="text-lg font-bold text-slate-200">Response Submitted!</h3>
-                <p className="text-sm text-slate-500">
-                  Your answer has been registered on the projector. Waiting for the presenter to show results or move slides.
-                </p>
+
+                <div className="border-t border-slate-850 pt-4 space-y-4">
+                  {/* Results: Polls / Quizzes */}
+                  {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
+                    <div className="space-y-3">
+                      {aggregatedTallies.map((tally) => {
+                        const isCorrectAnswer = 
+                          activeInteraction.type === "quiz" && 
+                          activeInteraction.config.correctOptionIndex === tally.index;
+                        return (
+                          <div key={tally.index} className="space-y-1">
+                            <div className="flex justify-between text-xs font-semibold text-slate-400">
+                              <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
+                                {tally.option} {isCorrectAnswer && "✓"}
+                              </span>
+                              <span>{tally.count} votes ({tally.percent}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-950 border border-slate-850 rounded-full h-3 overflow-hidden">
+                              <div
+                                style={{ width: `${tally.percent}%` }}
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  isCorrectAnswer ? "bg-emerald-500" : "bg-indigo-500"
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Results: Word Cloud */}
+                  {activeInteraction.type === "wordcloud" && (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        Popular Words
+                      </div>
+                      <div className="flex flex-wrap gap-2 justify-center py-2 bg-slate-950/60 border border-slate-850/50 rounded-2xl p-4">
+                        {wordCloudWords.length === 0 ? (
+                          <span className="text-xs text-slate-550 italic">No words submitted...</span>
+                        ) : (
+                          wordCloudWords.map((item, idx) => (
+                            <span 
+                              key={idx} 
+                              style={{ fontSize: `${Math.max(11, Math.min(22, 11 + item.count * 2))}px` }}
+                              className="font-bold text-indigo-400 px-1"
+                            >
+                              {item.text} <span className="text-[9px] text-slate-500 font-normal">({item.count})</span>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Results: Open Text Sticky Notes */}
+                  {activeInteraction.type === "opentext" && (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        Responses Feed ({responses.length})
+                      </div>
+                      <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                        {responses.map((note) => (
+                          <div 
+                            key={note.id} 
+                            className="bg-slate-950/50 border border-slate-850 rounded-xl p-3 text-xs text-slate-350"
+                          >
+                            <p className="leading-relaxed">"{note.value}"</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Results: Star Rating */}
+                  {activeInteraction.type === "rating" && (
+                    <div className="flex flex-col items-center justify-center py-2 gap-2 text-center">
+                      <span className="text-3xl font-extrabold text-indigo-400">
+                        {(
+                          responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
+                          Math.max(responses.length, 1)
+                        ).toFixed(1)}
+                      </span>
+                      <div className="flex gap-1 text-slate-700">
+                        {[1, 2, 3, 4, 5].map((idx) => {
+                          const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
+                          const filled = idx <= Math.round(average);
+                          return (
+                            <span key={idx} className={filled ? "text-yellow-450 fill-yellow-405 text-lg" : "text-lg"}>
+                              ★
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-slate-550">{responses.length} responses</span>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="bg-slate-900/70 border border-slate-850 rounded-3xl p-6 shadow-xl space-y-6">

@@ -14,7 +14,10 @@ def process_pdf(pdf_path):
         import fitz  # PyMuPDF
     except ImportError:
         print("PyMuPDF is not installed. Installing automatically...")
-        os.system(f"\"{sys.executable}\" -m pip install pymupdf")
+        ret = os.system(f"\"{sys.executable}\" -m pip install pymupdf")
+        if ret != 0:
+            print("Standard pip install failed. Retrying with --break-system-packages (for externally managed environments)...")
+            os.system(f"\"{sys.executable}\" -m pip install pymupdf --break-system-packages")
         import fitz
 
     print(f"Opening PDF file: {pdf_path}")

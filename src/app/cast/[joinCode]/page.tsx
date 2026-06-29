@@ -11,7 +11,8 @@ import {
   MessageSquare,
   Sparkles,
   QrCode,
-  Loader2
+  Loader2,
+  Star
 } from "lucide-react";
 import { 
   doc, 
@@ -46,6 +47,8 @@ interface Slide {
   imageUrl: string;
   thumbnailUrl: string;
   aspectRatio: number;
+  isInteractive?: boolean;
+  interactionType?: string;
 }
 
 interface Interaction {
@@ -249,17 +252,7 @@ export default function ProjectorCastPage() {
   return (
     <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col relative overflow-hidden h-screen w-screen justify-center items-center">
       
-      {/* Laser Pointer overlay */}
-      {laserPointer?.active && (
-        <div
-          className="absolute h-5 w-5 bg-red-500 rounded-full blur-[2px] shadow-lg shadow-red-500/80 animate-ping z-40 transition-all duration-75 pointer-events-none"
-          style={{
-            left: `${laserPointer.x * 100}%`,
-            top: `${laserPointer.y * 100}%`,
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-      )}
+
 
       {/* Floating Reactions Tray overlay */}
       <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
@@ -305,7 +298,7 @@ export default function ProjectorCastPage() {
       {activeSlide ? (
         <div
           ref={containerRef}
-          className="relative border border-slate-900 bg-black overflow-hidden shadow-2xl transition-all duration-300"
+          className="relative border border-slate-900 bg-black overflow-hidden shadow-2xl transition-all duration-300 flex"
           style={{
             width: "90%",
             height: "90%",
@@ -313,53 +306,71 @@ export default function ProjectorCastPage() {
             aspectRatio: activeSlide.aspectRatio || 1.777,
           }}
         >
-          {/* Slide Content Image */}
-          <img
-            src={activeSlide.imageUrl}
-            alt="Current Slide View"
-            className="w-full h-full object-contain pointer-events-none select-none"
-          />
+          {/* 1. LEFT PANEL: SLIDE IMAGE (Shown if NOT standalone interactive slide) */}
+          {!activeSlide.isInteractive && (
+            <div className={`relative bg-black flex items-center justify-center transition-all duration-300 ${activeInteraction ? "w-1/2 border-r border-slate-900" : "w-full h-full"}`}>
+              <img
+                src={activeSlide.imageUrl}
+                alt="Current Slide View"
+                className="w-full h-full object-contain pointer-events-none select-none"
+              />
 
-          {/* REALTIME QUESTION WIDGET OVERLAY */}
+              {/* Laser Pointer overlay - bound within the slide aspect-ratio container */}
+              {laserPointer?.active && (
+                <div
+                  className="absolute h-5 w-5 bg-red-500 rounded-full blur-[2px] shadow-lg shadow-red-500/80 animate-ping z-45 transition-all duration-75 pointer-events-none"
+                  style={{
+                    left: `${laserPointer.x * 100}%`,
+                    top: `${laserPointer.y * 100}%`,
+                    transform: "translate(-50%, -50%)",
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* 2. RIGHT PANEL (OR FULLSCREEN): INTERACTION RESULTS */}
           {activeInteraction && (
             <div
-              className="absolute z-20 bg-slate-950/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col justify-between max-w-xl min-w-[320px] max-h-[80%] overflow-y-auto"
-              style={{
-                left: `${activeInteraction.position.x * 100}%`,
-                top: `${activeInteraction.position.y * 100}%`,
-                transform: "translate(-50%, -50%)",
-              }}
+              className={`flex flex-col justify-center p-8 bg-slate-950/85 backdrop-blur-xl ${
+                activeSlide.isInteractive
+                  ? "w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 p-16"
+                  : "w-1/2 h-full"
+              }`}
             >
               <div>
                 <div className="flex items-center gap-2 mb-2 text-indigo-400">
-                  {activeInteraction.type === "poll" && <BarChart2 className="h-4 w-4" />}
-                  {activeInteraction.type === "quiz" && <HelpCircle className="h-4 w-4" />}
-                  {activeInteraction.type === "wordcloud" && <Sparkles className="h-4 w-4" />}
-                  {activeInteraction.type === "opentext" && <MessageSquare className="h-4 w-4" />}
+                  {activeInteraction.type === "poll" && <BarChart2 className="h-5 w-5" />}
+                  {activeInteraction.type === "quiz" && <HelpCircle className="h-5 w-5" />}
+                  {activeInteraction.type === "wordcloud" && <Sparkles className="h-5 w-5 animate-pulse" />}
+                  {activeInteraction.type === "opentext" && <MessageSquare className="h-5 w-5" />}
+                  {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-450 fill-yellow-450" />}
                   <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
                 </div>
-                <h2 className="text-lg font-bold text-slate-100 mb-4">{activeInteraction.question}</h2>
+                <h2 className={`font-extrabold text-slate-100 leading-snug mb-8 ${activeSlide.isInteractive ? "text-3xl" : "text-lg"}`}>
+                  {activeInteraction.question}
+                </h2>
               </div>
 
               {/* RENDER DYNAMIC AGGREGATED INTERACTION COMPONENT */}
-              <div className="space-y-3.5 flex-1">
+              <div className="space-y-4 flex-1 flex flex-col justify-center">
                 {/* 1. POLLS / QUIZ OPTION RESULTS */}
                 {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {aggregatedTallies.map((tally) => {
                       const isCorrectAnswer = 
                         activeInteraction.type === "quiz" && 
                         activeInteraction.config.correctOptionIndex === tally.index;
                         
                       return (
-                        <div key={tally.index} className="space-y-1">
-                          <div className="flex justify-between text-xs font-semibold text-slate-350">
+                        <div key={tally.index} className="space-y-1.5">
+                          <div className="flex justify-between text-xs font-semibold text-slate-355">
                             <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
                               {tally.option} {isCorrectAnswer && "✓"}
                             </span>
-                            <span>{tally.count} votes ({tally.percent}%)</span>
+                            <span className="font-bold text-slate-300">{tally.count} votes ({tally.percent}%)</span>
                           </div>
-                          <div className="w-full bg-slate-900 border border-slate-850 rounded-full h-3.5 overflow-hidden">
+                          <div className="w-full bg-slate-900 border border-slate-850 rounded-full h-4 overflow-hidden">
                             <motion.div
                               initial={{ width: 0 }}
                               animate={{ width: `${tally.percent}%` }}
@@ -376,27 +387,41 @@ export default function ProjectorCastPage() {
                   </div>
                 )}
 
-                {/* 2. WORD CLOUDS */}
+                {/* 2. SPARKING WORD CLOUDS (Golden Spiral Distribution) */}
                 {activeInteraction.type === "wordcloud" && (
-                  <div className="flex flex-wrap gap-2.5 justify-center py-4">
+                  <div className="h-72 w-full relative flex items-center justify-center overflow-hidden">
                     {wordCloudWords.length === 0 ? (
                       <span className="text-xs text-slate-500 italic">Waiting for words...</span>
                     ) : (
                       wordCloudWords.map((item, idx) => {
-                        // Calculate sizes dynamically based on tally counts
-                        const minSize = 12;
-                        const maxSize = 32;
                         const maxCount = wordCloudWords[0]?.count || 1;
+                        const minSize = 12;
+                        const maxSize = 42;
                         const size = minSize + (item.count / maxCount) * (maxSize - minSize);
                         
+                        // Golden spiral distribution angles
+                        const angle = (idx * 137.5) * (Math.PI / 180);
+                        const radius = Math.sqrt(idx) * (activeSlide.isInteractive ? 40 : 25);
+                        const tx = Math.cos(angle) * radius;
+                        const ty = Math.sin(angle) * radius;
+                        
+                        const colors = ["text-indigo-400", "text-purple-400", "text-pink-400", "text-blue-400", "text-teal-400"];
+                        const colorClass = colors[idx % colors.length];
+
                         return (
-                          <span
+                          <motion.span
                             key={idx}
-                            style={{ fontSize: `${size}px` }}
-                            className="font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent px-1.5 transition-all"
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1, x: tx, y: ty }}
+                            transition={{ type: "spring", stiffness: 80, delay: idx * 0.04 }}
+                            style={{ 
+                              fontSize: `${size}px`,
+                              position: "absolute"
+                            }}
+                            className={`font-extrabold tracking-tight select-none leading-none drop-shadow ${colorClass}`}
                           >
                             {item.text}
-                          </span>
+                          </motion.span>
                         );
                       })
                     )}
@@ -405,20 +430,22 @@ export default function ProjectorCastPage() {
 
                 {/* 3. OPEN TEXT STICKY NOTES */}
                 {activeInteraction.type === "opentext" && (
-                  <div className="grid grid-cols-2 gap-3.5 max-h-56 overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-1 scrollbar-thin">
                     {responses.length === 0 ? (
-                      <div className="col-span-2 text-xs text-slate-500 text-center py-8 italic">
+                      <div className="col-span-2 text-xs text-slate-500 text-center py-12 italic">
                         Waiting for audience inputs...
                       </div>
                     ) : (
                       responses.map((note) => (
-                        <div 
+                        <motion.div 
                           key={note.id} 
-                          className="bg-slate-900 border border-slate-850 rounded-xl p-3 shadow-md border-l-4 border-l-indigo-500 text-xs text-slate-200"
+                          initial={{ scale: 0.9, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="bg-slate-900 border border-slate-850 rounded-2xl p-4 shadow-lg border-l-4 border-l-indigo-500 text-xs text-slate-200"
                         >
-                          <p className="leading-normal mb-1">"{note.value}"</p>
-                          <p className="text-[10px] text-slate-550 text-right">- {note.participantName}</p>
-                        </div>
+                          <p className="leading-relaxed mb-2 font-medium">"{note.value}"</p>
+                          <p className="text-[10px] text-slate-500 text-right">- {note.participantName}</p>
+                        </motion.div>
                       ))
                     )}
                   </div>
@@ -426,33 +453,27 @@ export default function ProjectorCastPage() {
 
                 {/* 4. RATING STACKS */}
                 {activeInteraction.type === "rating" && (
-                  <div className="flex flex-col items-center justify-center py-6 gap-2">
-                    <span className="text-4xl font-extrabold text-indigo-400">
+                  <div className="flex flex-col items-center justify-center py-8 gap-3">
+                    <span className="text-5xl font-extrabold text-indigo-400 tracking-tight drop-shadow-md">
                       {(
                         responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
                         Math.max(responses.length, 1)
                       ).toFixed(1)}
                     </span>
-                    <div className="flex gap-1 text-slate-700">
+                    <div className="flex gap-1.5 text-slate-700">
                       {[1, 2, 3, 4, 5].map((idx) => {
                         const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
                         const filled = idx <= Math.round(average);
                         return (
-                          <span key={idx} className={filled ? "text-yellow-450 fill-yellow-405 text-xl" : "text-xl"}>
+                          <span key={idx} className={filled ? "text-yellow-450 fill-yellow-450 text-2xl" : "text-2xl"}>
                             ★
                           </span>
                         );
                       })}
                     </div>
-                    <span className="text-xs text-slate-500">{responses.length} responses</span>
+                    <span className="text-xs text-slate-500 font-semibold">{responses.length} responses</span>
                   </div>
                 )}
-              </div>
-
-              {/* Aggregation statistics footer */}
-              <div className="border-t border-slate-800 pt-3 flex justify-between text-[10px] text-slate-500 mt-4">
-                <span>Total Responses: {responses.length}</span>
-                <span>Realtime aggregate RAM sync</span>
               </div>
             </div>
           )}
