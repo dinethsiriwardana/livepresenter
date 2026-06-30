@@ -460,7 +460,7 @@ export default function ProjectorCastPage() {
                   {activeInteraction.type === "poll" && <BarChart2 className="h-5 w-5" />}
                   {activeInteraction.type === "quiz" && <HelpCircle className="h-5 w-5" />}
                   {activeInteraction.type === "opentext" && <MessageSquare className="h-5 w-5" />}
-                  {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-450 fill-yellow-450" />}
+                  {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" />}
                   <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
                 </div>
                 <h2 className={`font-extrabold text-slate-100 leading-snug mb-8 ${activeSlide.isInteractive ? "text-3xl" : "text-lg"}`}>
@@ -540,7 +540,7 @@ export default function ProjectorCastPage() {
                         const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
                         const filled = idx <= Math.round(average);
                         return (
-                          <span key={idx} className={filled ? "text-yellow-450 fill-yellow-450 text-2xl" : "text-2xl"}>
+                          <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-2xl" : "text-2xl"}>
                             ★
                           </span>
                         );

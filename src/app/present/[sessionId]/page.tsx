@@ -660,6 +660,49 @@ export default function PresenterRemotePage() {
                         })}
                       </div>
                     )}
+
+                    {/* Open Text Results */}
+                    {activeInter.type === "opentext" && (
+                      <div className="space-y-2.5 max-h-[40vh] overflow-y-auto pr-1 scrollbar-thin">
+                        {responses.length === 0 ? (
+                          <p className="text-xs text-slate-500 italic">Waiting for responses...</p>
+                        ) : (
+                          responses.map((note) => (
+                            <div 
+                              key={note.id} 
+                              className="bg-slate-955/40 border border-slate-850 rounded-xl p-3 text-xs text-slate-300"
+                            >
+                              <p className="leading-relaxed mb-1">"{note.value}"</p>
+                              <p className="text-[9px] text-slate-500 text-right">- {note.participantName}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* Rating Results */}
+                    {activeInter.type === "rating" && (
+                      <div className="flex flex-col items-center justify-center py-4 gap-2 text-center">
+                        <span className="text-4xl font-black text-indigo-400">
+                          {(
+                            responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
+                            Math.max(responses.length, 1)
+                          ).toFixed(1)}
+                        </span>
+                        <div className="flex gap-1 text-slate-700">
+                          {[1, 2, 3, 4, 5].map((idx) => {
+                            const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
+                            const filled = idx <= Math.round(average);
+                            return (
+                              <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-lg" : "text-lg"}>
+                                ★
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <span className="text-[10px] text-slate-500">{responses.length} responses</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -969,6 +1012,64 @@ export default function PresenterRemotePage() {
                               })}
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Live results for Open Text on Presenter screen */}
+                      {isActive && inter.type === "opentext" && (
+                        <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">
+                              Live Responses ({responses.length})
+                            </span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                          </div>
+                          {responses.length === 0 ? (
+                            <p className="text-[10px] text-slate-500 italic">Waiting for responses...</p>
+                          ) : (
+                            <div className="space-y-2 max-h-36 overflow-y-auto pr-1 scrollbar-thin">
+                              {responses.map((note) => (
+                                <div key={note.id} className="bg-slate-900 border border-slate-850 rounded-xl p-2.5 text-[10px] text-slate-355">
+                                  <p className="leading-relaxed">"{note.value}"</p>
+                                  <p className="text-[8px] text-slate-500 text-right mt-1">- {note.participantName}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Live results for Star Rating on Presenter screen */}
+                      {isActive && inter.type === "rating" && (
+                        <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">
+                              Live Average
+                            </span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-2xl font-black text-indigo-400">
+                                {(
+                                  responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
+                                  Math.max(responses.length, 1)
+                                ).toFixed(1)}
+                              </span>
+                              <span className="text-[9px] text-slate-500">{responses.length} responses</span>
+                            </div>
+                            <div className="flex gap-0.5 text-slate-700">
+                              {[1, 2, 3, 4, 5].map((idx) => {
+                                const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
+                                const filled = idx <= Math.round(average);
+                                return (
+                                  <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-base" : "text-base"}>
+                                    ★
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </div>
                       )}
                       {isActive && session.interactionStatus === "stopped" && (

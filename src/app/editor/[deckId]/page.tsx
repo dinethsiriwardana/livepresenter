@@ -107,6 +107,7 @@ export default function SlideEditorPage() {
   // Drag and drop / reordering states
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isReordering, setIsReordering] = useState(false);
 
   const handleAddSlide = async () => {
     if (newSlideType === "content" && !newSlideImage) {
@@ -262,6 +263,7 @@ export default function SlideEditorPage() {
   };
 
   const handleReorder = async (startIndex: number, endIndex: number) => {
+    if (isReordering) return;
     if (
       startIndex === endIndex || 
       startIndex < 0 || 
@@ -269,6 +271,8 @@ export default function SlideEditorPage() {
       startIndex >= slides.length || 
       endIndex >= slides.length
     ) return;
+    
+    setIsReordering(true);
     
     // 1. Optimistic UI update
     const reorderedSlides = [...slides];
@@ -342,6 +346,9 @@ export default function SlideEditorPage() {
     } catch (err: any) {
       console.error("Firestore reorder failed, reverting:", err);
       alert("Failed to save slide order: " + err.message);
+      setSlides(slides); // Revert optimistic update
+    } finally {
+      setIsReordering(false);
     }
   };
 
@@ -542,10 +549,10 @@ export default function SlideEditorPage() {
             {slides.map((slide, index) => (
               <div
                 key={slide.id}
-                draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDrop={(e) => handleDrop(e, index)}
+                draggable={!isReordering}
+                onDragStart={(e) => !isReordering && handleDragStart(e, index)}
+                onDragOver={(e) => !isReordering && handleDragOver(e, index)}
+                onDrop={(e) => !isReordering && handleDrop(e, index)}
                 onDragEnd={handleDragEnd}
                 onClick={() => setSelectedSlideId(slide.id)}
                 className={`w-full relative group rounded-2xl border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
@@ -576,24 +583,26 @@ export default function SlideEditorPage() {
                   <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     {index > 0 && (
                       <button
+                        disabled={isReordering}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleReorder(index, index - 1);
+                          if (!isReordering) handleReorder(index, index - 1);
                         }}
                         title="Move Up"
-                        className="p-1 bg-slate-950/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90"
+                        className="p-1 bg-slate-955/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
                       >
                         <ChevronUp className="h-3 w-3" />
                       </button>
                     )}
                     {index < slides.length - 1 && (
                       <button
+                        disabled={isReordering}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleReorder(index, index + 1);
+                          if (!isReordering) handleReorder(index, index + 1);
                         }}
                         title="Move Down"
-                        className="p-1 bg-slate-950/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90"
+                        className="p-1 bg-slate-955/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90 disabled:opacity-30 disabled:pointer-events-none"
                       >
                         <ChevronDown className="h-3 w-3" />
                       </button>
@@ -638,7 +647,7 @@ export default function SlideEditorPage() {
                     {activeSlide.interactionType === "quiz" && <HelpCircle className="h-6 w-6" />}
                     {activeSlide.interactionType === "wordcloud" && <Sparkles className="h-6 w-6 animate-pulse" />}
                     {activeSlide.interactionType === "opentext" && <MessageSquare className="h-6 w-6" />}
-                    {activeSlide.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-450 fill-yellow-450" />}
+                    {activeSlide.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-400 fill-yellow-400" />}
                     <span className="text-xs font-bold tracking-widest uppercase">{activeSlide.interactionType} SLIDE</span>
                   </div>
                   <h3 className="text-xl font-bold text-slate-100 max-w-lg leading-snug drop-shadow-md">

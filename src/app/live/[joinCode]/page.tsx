@@ -500,7 +500,7 @@ export default function AudienceLivePage() {
                             const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
                             const filled = idx <= Math.round(average);
                             return (
-                              <span key={idx} className={filled ? "text-yellow-450 fill-yellow-405 text-lg" : "text-lg"}>
+                              <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-lg" : "text-lg"}>
                                 ★
                               </span>
                             );
@@ -607,7 +607,7 @@ export default function AudienceLivePage() {
                             disabled={submitting}
                             className="text-4xl text-slate-700 hover:scale-110 active:scale-100 transition-all focus:outline-none"
                           >
-                            <span className={val <= ratingVal ? "text-yellow-450 fill-yellow-405" : ""}>
+                            <span className={val <= ratingVal ? "text-yellow-400 fill-yellow-400" : ""}>
                               ★
                             </span>
                           </button>
