@@ -30,6 +30,7 @@ import { ref as dbRef, onValue, onChildAdded, off } from "firebase/database";
 import { db, rtdb } from "@/lib/firebaseClient";
 import { AnimatePresence, motion } from "framer-motion";
 import { calculateLeaderboard } from "@/lib/leaderboard";
+import { getTheme } from "@/lib/theme";
 
 interface Session {
   id: string; // joinCode
@@ -85,9 +86,20 @@ export default function ProjectorCastPage() {
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
+  const [presentationTheme, setPresentationTheme] = useState<string>("dark-indigo");
   const [slides, setSlides] = useState<Slide[]>([]);
   const [activeSlide, setActiveSlide] = useState<Slide | null>(null);
   const [activeInteraction, setActiveInteraction] = useState<Interaction | null>(null);
+
+  // Load presentation theme
+  useEffect(() => {
+    if (!session?.presentationId) return;
+    getDoc(doc(db, "presentations", session.presentationId)).then((snap) => {
+      if (snap.exists()) {
+        setPresentationTheme(snap.data()?.colorTheme || "dark-indigo");
+      }
+    });
+  }, [session?.presentationId]);
   
   // Real-time Aggregated Responses in RAM (Firestore listen)
   const [responses, setResponses] = useState<ResponseItem[]>([]);
@@ -332,6 +344,8 @@ export default function ProjectorCastPage() {
     );
   }
 
+  const theme = getTheme(presentationTheme);
+
   return (
     <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col relative overflow-hidden h-screen w-screen justify-center items-center">
       
@@ -513,194 +527,198 @@ export default function ProjectorCastPage() {
             </div>
           ) : (
             <>
-              {/* 1. LEFT PANEL: SLIDE IMAGE (Shown if NOT standalone interactive slide) */}
-              {!activeSlide?.isInteractive && (
-            <div className={`relative bg-black flex items-center justify-center transition-all duration-300 ${activeInteraction && activeInteraction.type !== "wordcloud" ? "w-1/2 border-r border-slate-900" : "w-full h-full"}`}>
-              <img
-                src={activeSlide?.imageUrl}
-                alt="Current Slide View"
-                className="w-full h-full object-contain pointer-events-none select-none"
-              />
-
-              {/* Laser Pointer overlay - bound within the slide aspect-ratio container */}
-              {laserPointer?.active && (
-                <div
-                  className="absolute h-5 w-5 bg-red-500 rounded-full blur-[2px] shadow-lg shadow-red-500/80 animate-ping z-45 transition-all duration-75 pointer-events-none"
-                  style={{
-                    left: `${laserPointer.x * 100}%`,
-                    top: `${laserPointer.y * 100}%`,
-                    transform: "translate(-50%, -50%)",
-                  }}
-                />
-              )}
-
-              {/* Dynamic Spreading Word Cloud Overlay directly on top of the slide page */}
-              {activeInteraction && activeInteraction.type === "wordcloud" && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center overflow-hidden bg-black/45 backdrop-blur-[2px]">
-                  {wordCloudWords.length === 0 ? (
-                    <div className="text-center space-y-2">
-                      <Sparkles className="h-8 w-8 text-indigo-400 animate-pulse mx-auto" />
-                      <span className="text-xs text-slate-500 italic block">Waiting for words...</span>
-                    </div>
+              {/* 1. LEFT PANEL: SLIDE IMAGE / DYNAMIC GRADIENT */}
+              {(!activeSlide?.isInteractive || (activeSlide?.isInteractive && activeInteraction?.type === "wordcloud")) && (
+                <div className={`relative flex items-center justify-center transition-all duration-300 ${activeInteraction && activeInteraction.type !== "wordcloud" ? "w-1/2 border-r border-slate-900" : "w-full h-full"} ${activeSlide?.isInteractive ? theme.gradientClass : "bg-black"}`}>
+                  {activeSlide?.isInteractive ? (
+                    <div className="absolute inset-0 pointer-events-none" />
                   ) : (
-                    wordCloudWords.map((item, idx) => {
-                      const maxCount = wordCloudWords[0]?.count || 1;
-                      const minSize = 16;
-                      const maxSize = 64; // Responsive, massive font size
-                      const size = minSize + (item.count / maxCount) * (maxSize - minSize);
-                      
-                      // Spiral distribution angles spreading from the middle
-                      const angle = (idx * 137.5) * (Math.PI / 180);
-                      const radius = Math.sqrt(idx + 1) * 85; 
-                      const tx = Math.cos(angle) * radius;
-                      const ty = Math.sin(angle) * radius;
-                      
-                      const colors = [
-                        "text-indigo-350", 
-                        "text-purple-300", 
-                        "text-pink-300", 
-                        "text-blue-300", 
-                        "text-teal-300", 
-                        "text-yellow-200", 
-                        "text-emerald-300",
-                        "text-rose-300 font-extrabold"
-                      ];
-                      const colorClass = colors[idx % colors.length];
+                    <img
+                      src={activeSlide?.imageUrl}
+                      alt="Current Slide View"
+                      className="w-full h-full object-contain pointer-events-none select-none"
+                    />
+                  )}
 
-                      return (
-                        <motion.span
-                          key={idx}
-                          initial={{ scale: 0, opacity: 0, x: 0, y: 0 }}
-                          animate={{ scale: 1, opacity: 1, x: tx, y: ty }}
-                          transition={{ 
-                            type: "spring", 
-                            stiffness: 45, 
-                            damping: 12,
-                            delay: idx * 0.03 
-                          }}
-                          style={{ 
-                            fontSize: `${size}px`,
-                            position: "absolute"
-                          }}
-                          className={`font-black tracking-tight select-none leading-none text-center filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${colorClass}`}
-                        >
-                          {item.text}
-                        </motion.span>
-                      );
-                    })
+                  {/* Laser Pointer overlay - bound within the slide aspect-ratio container */}
+                  {laserPointer?.active && (
+                    <div
+                      className="absolute h-5 w-5 bg-red-500 rounded-full blur-[2px] shadow-lg shadow-red-500/80 animate-ping z-45 transition-all duration-75 pointer-events-none"
+                      style={{
+                        left: `${laserPointer.x * 100}%`,
+                        top: `${laserPointer.y * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+                  )}
+
+                  {/* Dynamic Spreading Word Cloud Overlay directly on top of the slide page */}
+                  {activeInteraction && activeInteraction.type === "wordcloud" && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-hidden bg-black/45 backdrop-blur-[2px]">
+                      {wordCloudWords.length === 0 ? (
+                        <div className="text-center space-y-2">
+                          <Sparkles className="h-8 w-8 text-indigo-400 animate-pulse mx-auto" />
+                          <span className="text-xs text-slate-500 italic block">Waiting for words...</span>
+                        </div>
+                      ) : (
+                        wordCloudWords.map((item, idx) => {
+                          const maxCount = Math.max(...wordCloudWords.map(w => w.count), 1);
+                          const minSize = 16;
+                          const maxSize = 52;
+                          const size = minSize + (item.count / maxCount) * (maxSize - minSize);
+                          
+                          // Spiral distribution angles spreading from the middle
+                          const angle = (idx * 137.5) * (Math.PI / 180);
+                          const radius = Math.sqrt(idx + 1) * 85; 
+                          const tx = Math.cos(angle) * radius;
+                          const ty = Math.sin(angle) * radius;
+                          
+                          const colors = [
+                            "text-indigo-350", 
+                            "text-purple-300", 
+                            "text-pink-300", 
+                            "text-blue-300", 
+                            "text-teal-300", 
+                            "text-yellow-200", 
+                            "text-emerald-300",
+                            "text-rose-300 font-extrabold"
+                          ];
+                          const colorClass = colors[idx % colors.length];
+
+                          return (
+                            <motion.span
+                              key={idx}
+                              initial={{ scale: 0, opacity: 0, x: 0, y: 0 }}
+                              animate={{ scale: 1, opacity: 1, x: tx, y: ty }}
+                              transition={{ 
+                                type: "spring", 
+                                stiffness: 45, 
+                                damping: 12,
+                                delay: idx * 0.03 
+                              }}
+                              style={{ 
+                                fontSize: `${size}px`,
+                                position: "absolute"
+                              }}
+                              className={`font-black tracking-tight select-none leading-none text-center filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${colorClass}`}
+                            >
+                              {item.text}
+                            </motion.span>
+                          );
+                        })
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
-          )}
 
-          {/* 2. RIGHT PANEL (OR FULLSCREEN): INTERACTION RESULTS */}
-          {activeInteraction && activeInteraction.type !== "wordcloud" && (
-            <div
-              className={`flex flex-col justify-center p-8 bg-slate-950/85 backdrop-blur-xl ${
-                activeSlide?.isInteractive
-                  ? "w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 p-16"
-                  : "w-1/2 h-full"
-              }`}
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-2 text-indigo-400">
-                  {activeInteraction.type === "poll" && <BarChart2 className="h-5 w-5" />}
-                  {activeInteraction.type === "quiz" && <HelpCircle className="h-5 w-5" />}
-                  {activeInteraction.type === "opentext" && <MessageSquare className="h-5 w-5" />}
-                  {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" />}
-                  <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
-                </div>
-                <h2 className={`font-extrabold text-slate-100 leading-snug mb-8 ${activeSlide?.isInteractive ? "text-3xl" : "text-lg"}`}>
-                  {activeInteraction.question}
-                </h2>
-              </div>
-
-              {/* RENDER DYNAMIC AGGREGATED INTERACTION COMPONENT */}
-              <div className="space-y-4 flex-1 flex flex-col justify-center">
-                {/* 1. POLLS / QUIZ OPTION RESULTS */}
-                {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
-                  <div className="space-y-4">
-                    {aggregatedTallies.map((tally) => {
-                      const isCorrectAnswer = 
-                        activeInteraction.type === "quiz" && 
-                        activeInteraction.config.correctOptionIndex === tally.index;
-                        
-                      return (
-                        <div key={tally.index} className="space-y-1.5">
-                          <div className="flex justify-between text-xs font-semibold text-slate-355">
-                            <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
-                              {tally.option} {isCorrectAnswer && "✓"}
-                            </span>
-                            <span className="font-bold text-slate-300">{tally.count} votes ({tally.percent}%)</span>
-                          </div>
-                          <div className="w-full bg-slate-900 border border-slate-850 rounded-full h-4 overflow-hidden">
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${tally.percent}%` }}
-                              className={`h-full rounded-full ${
-                                isCorrectAnswer
-                                  ? "bg-emerald-500"
-                                  : "bg-gradient-to-r from-indigo-500 to-purple-650"
-                              }`}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+              {/* 2. RIGHT PANEL (OR FULLSCREEN): INTERACTION RESULTS */}
+              {activeInteraction && activeInteraction.type !== "wordcloud" && (
+                <div
+                  className={`flex flex-col justify-center p-8 backdrop-blur-xl ${
+                    activeSlide?.isInteractive
+                      ? `${theme.gradientClass} p-16 w-full h-full`
+                      : "w-1/2 h-full bg-slate-950/85"
+                  }`}
+                >
+                  <div>
+                    <div className={`flex items-center gap-2 mb-2 ${theme.isLight && activeSlide?.isInteractive ? "text-indigo-650" : "text-indigo-400"}`}>
+                      {activeInteraction.type === "poll" && <BarChart2 className="h-5 w-5" />}
+                      {activeInteraction.type === "quiz" && <HelpCircle className="h-5 w-5" />}
+                      {activeInteraction.type === "opentext" && <MessageSquare className="h-5 w-5" />}
+                      {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" />}
+                      <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
+                    </div>
+                    <h2 className={`font-extrabold leading-snug mb-8 ${activeSlide?.isInteractive ? `text-3xl ${theme.textClass}` : "text-lg text-slate-100"}`}>
+                      {activeInteraction.question}
+                    </h2>
                   </div>
-                )}
 
-                {/* 3. OPEN TEXT STICKY NOTES */}
-                {activeInteraction.type === "opentext" && (
-                  <div className="grid grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-1 scrollbar-thin">
-                    {responses.length === 0 ? (
-                      <div className="col-span-2 text-xs text-slate-500 text-center py-12 italic">
-                        Waiting for audience inputs...
+                  {/* RENDER DYNAMIC AGGREGATED INTERACTION COMPONENT */}
+                  <div className="space-y-4 flex-1 flex flex-col justify-center">
+                    {/* 1. POLLS / QUIZ OPTION RESULTS */}
+                    {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
+                      <div className="space-y-4">
+                        {aggregatedTallies.map((tally) => {
+                          const isCorrectAnswer = 
+                            activeInteraction.type === "quiz" && 
+                            activeInteraction.config.correctOptionIndex === tally.index;
+                            
+                          return (
+                            <div key={tally.index} className="space-y-1.5">
+                              <div className={`flex justify-between text-xs font-semibold ${theme.isLight && activeSlide?.isInteractive ? "text-slate-800" : "text-slate-350"}`}>
+                                <span className={isCorrectAnswer ? "text-emerald-500 font-bold" : ""}>
+                                  {tally.option} {isCorrectAnswer && "✓"}
+                                </span>
+                                <span className={`font-bold ${theme.isLight && activeSlide?.isInteractive ? "text-slate-700" : "text-slate-300"}`}>{tally.count} votes ({tally.percent}%)</span>
+                              </div>
+                              <div className={`w-full ${theme.isLight && activeSlide?.isInteractive ? "bg-slate-200/80 border border-slate-300" : "bg-slate-900 border border-slate-850"} rounded-full h-4 overflow-hidden`}>
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${tally.percent}%` }}
+                                  className={`h-full rounded-full ${
+                                    isCorrectAnswer
+                                      ? "bg-emerald-500"
+                                      : "bg-gradient-to-r from-indigo-500 to-purple-650"
+                                  }`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ) : (
-                      responses.map((note) => (
-                        <motion.div 
-                          key={note.id} 
-                          initial={{ scale: 0.9, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          className="bg-slate-900 border border-slate-855 rounded-2xl p-4 shadow-lg border-l-4 border-l-indigo-500 text-xs text-slate-200"
+                    )}
+
+                    {/* 3. OPEN TEXT STICKY NOTES */}
+                    {activeInteraction.type === "opentext" && (
+                      <div className="grid grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-1 scrollbar-thin">
+                        {responses.length === 0 ? (
+                          <div className="col-span-2 text-xs text-slate-500 text-center py-12 italic">
+                            Waiting for audience inputs...
+                          </div>
+                        ) : (
+                          responses.map((note) => (
+                            <motion.div 
+                              key={note.id} 
+                              initial={{ scale: 0.9, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              className={`${theme.isLight && activeSlide?.isInteractive ? "bg-white border-slate-200 text-slate-800 shadow-md" : "bg-slate-900 border border-slate-855 text-slate-200"} border rounded-2xl p-4 shadow-lg border-l-4 border-l-indigo-500 text-xs`}
                         >
-                          <p className="leading-relaxed mb-2 font-medium">"{note.value}"</p>
-                          <p className="text-[10px] text-slate-500 text-right">- {note.participantName}</p>
-                        </motion.div>
-                      ))
+                              <p className="leading-relaxed mb-2 font-medium">"{note.value}"</p>
+                              <p className={`text-[10px] ${theme.isLight && activeSlide?.isInteractive ? "text-slate-500" : "text-slate-500"} text-right`}>- {note.participantName}</p>
+                            </motion.div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* 4. RATING STACKS */}
+                    {activeInteraction.type === "rating" && (
+                      <div className="flex flex-col items-center justify-center py-8 gap-3">
+                        <span className={`text-5xl font-extrabold ${theme.isLight && activeSlide?.isInteractive ? "text-indigo-650" : "text-indigo-400"} tracking-tight drop-shadow-md`}>
+                          {(
+                            responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
+                            Math.max(responses.length, 1)
+                          ).toFixed(1)}
+                        </span>
+                        <div className={`flex gap-1.5 ${theme.isLight && activeSlide?.isInteractive ? "text-slate-400" : "text-slate-700"}`}>
+                          {[1, 2, 3, 4, 5].map((idx) => {
+                            const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
+                            const filled = idx <= Math.round(average);
+                            return (
+                              <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-2xl" : "text-2xl"}>
+                                ★
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <span className={`text-xs ${theme.isLight && activeSlide?.isInteractive ? "text-slate-700 font-bold" : "text-slate-500 font-semibold"}`}>{responses.length} responses</span>
+                      </div>
                     )}
                   </div>
-                )}
-
-                {/* 4. RATING STACKS */}
-                {activeInteraction.type === "rating" && (
-                  <div className="flex flex-col items-center justify-center py-8 gap-3">
-                    <span className="text-5xl font-extrabold text-indigo-400 tracking-tight drop-shadow-md">
-                      {(
-                        responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
-                        Math.max(responses.length, 1)
-                      ).toFixed(1)}
-                    </span>
-                    <div className="flex gap-1.5 text-slate-700">
-                      {[1, 2, 3, 4, 5].map((idx) => {
-                        const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
-                        const filled = idx <= Math.round(average);
-                        return (
-                          <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-2xl" : "text-2xl"}>
-                            ★
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <span className="text-xs text-slate-500 font-semibold">{responses.length} responses</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          </>
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (

@@ -28,7 +28,8 @@ import {
   Check,
   X,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Star
 } from "lucide-react";
 import { 
   doc, 
@@ -45,6 +46,7 @@ import { db, rtdb } from "@/lib/firebaseClient";
 import { ref as dbRef, onChildAdded, off } from "firebase/database";
 import { AnimatePresence, motion } from "framer-motion";
 import { calculateLeaderboard } from "@/lib/leaderboard";
+import { getTheme } from "@/lib/theme";
 
 interface Session {
   id: string; // joinCode
@@ -85,6 +87,7 @@ export default function PresenterRemotePage() {
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
+  const [presentationTheme, setPresentationTheme] = useState<string>("dark-indigo");
   const [slides, setSlides] = useState<Slide[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,6 +189,16 @@ export default function PresenterRemotePage() {
 
     return () => unsubscribe();
   }, [sessionId, router, slides.length]);
+
+  // Load presentation theme
+  useEffect(() => {
+    if (!session?.presentationId) return;
+    getDoc(doc(db, "presentations", session.presentationId)).then((snap) => {
+      if (snap.exists()) {
+        setPresentationTheme(snap.data()?.colorTheme || "dark-indigo");
+      }
+    });
+  }, [session?.presentationId]);
 
   // Load Interactions for current slide
   useEffect(() => {
@@ -434,6 +447,7 @@ export default function PresenterRemotePage() {
     );
   }
 
+  const theme = getTheme(presentationTheme);
   const currentSlideData = slides.find(s => parseInt(s.id) === session.currentSlide);
 
   return (
@@ -566,8 +580,18 @@ export default function PresenterRemotePage() {
                 className="w-full h-full object-contain pointer-events-none select-none animate-in zoom-in-95 duration-300"
               />
             ) : (
-              <div className="w-full h-full bg-slate-900 flex items-center justify-center">
-                <span className="text-sm text-slate-500 italic">Interactive Slide Content</span>
+              <div className={`w-full h-full ${theme.gradientClass} flex flex-col items-center justify-center text-center p-8 select-none`}>
+                <div className={`flex items-center gap-2 mb-2 ${theme.isLight ? 'text-indigo-650' : 'text-indigo-400'}`}>
+                  {currentSlideData.interactionType === "poll" && <BarChart2 className="h-6 w-6" />}
+                  {currentSlideData.interactionType === "quiz" && <HelpCircle className="h-6 w-6" />}
+                  {currentSlideData.interactionType === "wordcloud" && <Sparkles className="h-6 w-6 animate-pulse" />}
+                  {currentSlideData.interactionType === "opentext" && <MessageSquare className="h-6 w-6" />}
+                  {currentSlideData.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-500 fill-yellow-500" />}
+                  <span className="text-xs font-bold tracking-widest uppercase">{currentSlideData.interactionType} SLIDE</span>
+                </div>
+                <h3 className={`text-xl font-bold ${theme.textClass} max-w-lg leading-snug drop-shadow-md`}>
+                  {interactions[0]?.question || "Interactive Question Slide"}
+                </h3>
               </div>
             )
           ) : (
@@ -1472,20 +1496,19 @@ export default function PresenterRemotePage() {
                   }`}
                 >
                   <div className="aspect-[16/9] w-full bg-slate-950 relative">
-                    {slide.thumbnailUrl ? (
+                    {slide.isInteractive ? (
+                      <div className={`w-full h-full ${theme.gradientClass} flex flex-col items-center justify-center text-[8px] font-bold p-1 text-center ${theme.textClass} leading-tight`}>
+                        <span className="scale-90 font-black tracking-tighter uppercase">{slide.interactionType}</span>
+                      </div>
+                    ) : slide.thumbnailUrl ? (
                       <img
                         src={slide.thumbnailUrl}
                         alt={`Slide ${index + 1}`}
                         className="w-full h-full object-contain pointer-events-none"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-slate-900 to-indigo-950 flex flex-col items-center justify-center text-[10px] text-slate-400 font-bold p-2 text-center">
-                        {slide.isInteractive && (
-                          <div className="flex flex-col items-center gap-1">
-                            <Sparkles className="h-4 w-4 text-indigo-400 animate-pulse" />
-                            <span className="capitalize">{slide.interactionType}</span>
-                          </div>
-                        )}
+                      <div className="w-full h-full bg-slate-950 flex items-center justify-center text-[10px] text-slate-500">
+                        Interactive
                       </div>
                     )}
                     

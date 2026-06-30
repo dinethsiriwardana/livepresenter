@@ -32,6 +32,7 @@ import {
 import { ref as dbRef, push } from "firebase/database";
 import { db, rtdb } from "@/lib/firebaseClient";
 import { calculateLeaderboard } from "@/lib/leaderboard";
+import { getTheme } from "@/lib/theme";
 
 interface Session {
   id: string; // joinCode
@@ -73,6 +74,7 @@ export default function AudienceLivePage() {
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
+  const [presentationTheme, setPresentationTheme] = useState<string>("dark-indigo");
   const [activeInteraction, setActiveInteraction] = useState<Interaction | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -121,6 +123,7 @@ export default function AudienceLivePage() {
         getDoc(doc(db, "presentations", sessionData.presentationId)).then(presSnap => {
           if (presSnap.exists()) {
             setTotalSlides(presSnap.data()?.slideCount || 0);
+            setPresentationTheme(presSnap.data()?.colorTheme || "dark-indigo");
           }
         });
       }
@@ -408,7 +411,7 @@ export default function AudienceLivePage() {
       <div className="fixed inset-0 z-0 bg-slate-950 flex items-center justify-center">
         {activeSlide ? (
           activeSlide.isInteractive ? (
-            <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950" />
+            <div className={`w-full h-full ${getTheme(presentationTheme).gradientClass}`} />
           ) : activeSlide.imageUrl ? (
             <img 
               src={activeSlide.imageUrl} 

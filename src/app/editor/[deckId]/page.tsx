@@ -24,7 +24,11 @@ import {
   Loader2,
   Sparkles,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  FileUp,
+  File,
+  Upload,
+  CheckCircle2
 } from "lucide-react";
 import { 
   doc, 
@@ -38,16 +42,18 @@ import {
   orderBy, 
   query 
 } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
+import { db, storage } from "@/lib/firebaseClient";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getTheme } from "@/lib/theme";
 
 interface Slide {
   id: string; // slideNumber
   imageUrl: string;
   thumbnailUrl: string;
-  aspectRatio: number;
-  notes: string;
+  notes?: string;
   isInteractive?: boolean;
   interactionType?: string;
+  aspectRatio?: number;
 }
 
 interface Interaction {
@@ -71,6 +77,7 @@ export default function SlideEditorPage() {
   const router = useRouter();
 
   const [deckTitle, setDeckTitle] = useState("Loading presentation...");
+  const [colorTheme, setColorTheme] = useState<string>("dark-indigo");
   const [slides, setSlides] = useState<Slide[]>([]);
   const [selectedSlideId, setSelectedSlideId] = useState<string>("1");
   const [interactions, setInteractions] = useState<Interaction[]>([]);
@@ -109,6 +116,160 @@ export default function SlideEditorPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isReordering, setIsReordering] = useState(false);
   const isReorderingRef = useRef(false);
+
+  // Import PDF states
+  const [isImportPdfModalOpen, setIsImportPdfModalOpen] = useState(false);
+  const [importPdfFile, setImportPdfFile] = useState<File | null>(null);
+  const [importingPdf, setImportingPdf] = useState(false);
+  const [importPdfProgress, setImportPdfProgress] = useState("");
+  const [importPdfPercent, setImportPdfPercent] = useState(0);
+  const [importPdfEta, setImportPdfEta] = useState<number | null>(null);
+  const [importPdfLogs, setImportPdfLogs] = useState<string[]>([]);
+  const [importPdfError, setImportPdfError] = useState("");
+  const [importPdfSuccess, setImportPdfSuccess] = useState(false);
+  const importPdfInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportPdf = async () => {
+    if (!importPdfFile) return;
+    setImportingPdf(true);
+    setImportPdfError("");
+    setImportPdfPercent(0);
+    setImportPdfEta(null);
+    setImportPdfLogs([]);
+    setImportPdfSuccess(false);
+
+    const ilog = (msg: string) => {
+      const stamp = new Date().toLocaleTimeString();
+      const line = `[${stamp}] ${msg}`;
+      setImportPdfLogs((prev) => [...prev, line]);
+    };
+
+    const startTime = Date.now();
+
+    try {
+      ilog("Loading PDF engine...");
+      setImportPdfProgress("Initializing PDF engine...");
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      ilog("PDF engine ready.");
+
+      ilog("Reading PDF into memory...");
+      setImportPdfProgress("Reading PDF file...");
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(new Error("Failed to read PDF"));
+        reader.readAsArrayBuffer(importPdfFile);
+      });
+      ilog(`Read ${(importPdfFile.size / 1024 / 1024).toFixed(2)} MB.`);
+
+      ilog("Parsing PDF pages...");
+      setImportPdfProgress("Loading PDF pages...");
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdfDoc = await loadingTask.promise;
+      const numPages = pdfDoc.numPages;
+      ilog(`PDF parsed. Total pages: ${numPages}`);
+
+      if (numPages === 0) throw new Error("The uploaded PDF has no pages.");
+
+      // Snapshot current slide count before starting
+      const slideOffset = slides.length;
+      ilog(`Appending ${numPages} page(s) after slide ${slideOffset}.`);
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const newSlideIndex = slideOffset + pageNum;
+        ilog(`Processing page ${pageNum} of ${numPages}...`);
+        setImportPdfProgress(`Processing page ${pageNum} of ${numPages}...`);
+
+        const page = await pdfDoc.getPage(pageNum);
+
+        // High-res canvas (scale 2.0)
+        const hiViewport = page.getViewport({ scale: 2.0 });
+        const hiCanvas = document.createElement("canvas");
+        hiCanvas.width = hiViewport.width;
+        hiCanvas.height = hiViewport.height;
+        const hiCtx = hiCanvas.getContext("2d");
+        if (!hiCtx) throw new Error("Could not create canvas context");
+        await page.render({ canvasContext: hiCtx, viewport: hiViewport, canvas: hiCanvas }).promise;
+        const hiBlob = await new Promise<Blob | null>((res) => hiCanvas.toBlob(res, "image/png"));
+        if (!hiBlob) throw new Error(`Failed to rasterize page ${pageNum}`);
+        ilog(`Page ${pageNum} high-res PNG rendered.`);
+
+        // Thumbnail canvas (scale 0.4)
+        const thumbViewport = page.getViewport({ scale: 0.4 });
+        const thumbCanvas = document.createElement("canvas");
+        thumbCanvas.width = thumbViewport.width;
+        thumbCanvas.height = thumbViewport.height;
+        const thumbCtx = thumbCanvas.getContext("2d");
+        if (!thumbCtx) throw new Error("Could not create thumbnail canvas context");
+        await page.render({ canvasContext: thumbCtx, viewport: thumbViewport, canvas: thumbCanvas }).promise;
+        const thumbBlob = await new Promise<Blob | null>((res) => thumbCanvas.toBlob(res, "image/png"));
+        if (!thumbBlob) throw new Error(`Failed to generate thumbnail for page ${pageNum}`);
+        ilog(`Page ${pageNum} thumbnail generated.`);
+
+        // Upload to Storage
+        ilog(`Uploading page ${pageNum} assets to Cloud Storage...`);
+        setImportPdfProgress(`Uploading assets for page ${pageNum}...`);
+        const slideStorageRef = storageRef(storage, `slides/${deckId}/slide_${newSlideIndex}.png`);
+        const thumbStorageRef = storageRef(storage, `thumbnails/${deckId}/thumb_${newSlideIndex}.png`);
+        await uploadBytes(slideStorageRef, hiBlob);
+        await uploadBytes(thumbStorageRef, thumbBlob);
+        const slideUrl = await getDownloadURL(slideStorageRef);
+        const thumbUrl = await getDownloadURL(thumbStorageRef);
+
+        const aspectRatio = hiViewport.width / hiViewport.height;
+
+        // Write slide document to Firestore
+        ilog(`Saving slide ${newSlideIndex} metadata to Firestore...`);
+        await setDoc(doc(db, "presentations", deckId, "slides", newSlideIndex.toString()), {
+          imageUrl: slideUrl,
+          thumbnailUrl: thumbUrl,
+          aspectRatio,
+          notes: "",
+        });
+
+        // Update progress
+        const pct = Math.round((pageNum / numPages) * 100);
+        setImportPdfPercent(pct);
+        const elapsedMs = Date.now() - startTime;
+        const avgMs = elapsedMs / pageNum;
+        const remainingMs = avgMs * (numPages - pageNum);
+        setImportPdfEta(Math.max(Math.round(remainingMs / 1000), 0));
+        ilog(`Page ${pageNum} done (${pct}%).`);
+      }
+
+      // Update slideCount on the deck
+      ilog("Updating slide count...");
+      await updateDoc(doc(db, "presentations", deckId), {
+        slideCount: slideOffset + numPages,
+      });
+
+      ilog("All pages imported successfully!");
+      setImportPdfSuccess(true);
+      // Select the first newly appended slide
+      setTimeout(() => {
+        setSelectedSlideId((slideOffset + 1).toString());
+        setIsImportPdfModalOpen(false);
+        setImportPdfFile(null);
+        setImportPdfSuccess(false);
+      }, 1200);
+
+    } catch (err: any) {
+      console.error(err);
+      ilog(`Error: ${err.message || "Unknown error"}`);
+      setImportPdfError(err.message || "An error occurred during PDF import.");
+    } finally {
+      setImportingPdf(false);
+    }
+  };
+
+  const validateImportPdf = (f: File) => {
+    const isPdf = f.type === "application/pdf" || f.name.endsWith(".pdf");
+    if (!isPdf) { setImportPdfError("Please upload a PDF file."); return; }
+    if (f.size > 100 * 1024 * 1024) { setImportPdfError("File size exceeds 100 MB limit."); return; }
+    setImportPdfError("");
+    setImportPdfFile(f);
+  };
 
   const handleAddSlide = async () => {
     if (newSlideType === "content" && !newSlideImage) {
@@ -395,6 +556,7 @@ export default function SlideEditorPage() {
     const unsubDeck = onSnapshot(deckRef, (docSnap) => {
       if (docSnap.exists()) {
         setDeckTitle(docSnap.data().title || "Untitled Presentation");
+        setColorTheme(docSnap.data().colorTheme || "dark-indigo");
       } else {
         router.push("/dashboard");
       }
@@ -447,6 +609,7 @@ export default function SlideEditorPage() {
     return () => unsubscribe();
   }, [deckId, selectedSlideId]);
 
+  const theme = getTheme(colorTheme);
   const activeSlide = slides.find(s => s.id === selectedSlideId);
 
   // Canvas Click Handler: Calculates relative coordinates
@@ -567,7 +730,11 @@ export default function SlideEditorPage() {
                 } ${draggedIndex === index ? "opacity-30 scale-98" : ""}`}
               >
                 <div className="aspect-[16/9] w-full bg-slate-950 relative">
-                  {slide.thumbnailUrl ? (
+                  {slide.isInteractive ? (
+                    <div className={`w-full h-full ${theme.gradientClass} flex flex-col items-center justify-center text-[8px] font-bold p-1 text-center ${theme.textClass} leading-tight`}>
+                      <span className="scale-90 font-black tracking-tighter uppercase">{slide.interactionType}</span>
+                    </div>
+                  ) : slide.thumbnailUrl ? (
                     <img
                       src={slide.thumbnailUrl}
                       alt={`Slide ${index + 1}`}
@@ -616,13 +783,31 @@ export default function SlideEditorPage() {
             ))}
           </div>
           
-          <button
-            onClick={() => setIsAddSlideModalOpen(true)}
-            className="w-full mt-2 py-3 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-98 shadow-md shadow-indigo-600/10"
-          >
-            <Plus className="h-4 w-4" />
-            Add Custom Slide
-          </button>
+          <div className="flex flex-col gap-2 mt-2">
+            <button
+              onClick={() => setIsAddSlideModalOpen(true)}
+              className="w-full py-3 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-98 shadow-md shadow-indigo-600/10"
+            >
+              <Plus className="h-4 w-4" />
+              Add Custom Slide
+            </button>
+            <button
+              onClick={() => {
+                setImportPdfFile(null);
+                setImportPdfError("");
+                setImportPdfLogs([]);
+                setImportPdfPercent(0);
+                setImportPdfEta(null);
+                setImportPdfSuccess(false);
+                setImportingPdf(false);
+                setIsImportPdfModalOpen(true);
+              }}
+              className="w-full py-3 px-3 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/50 text-indigo-400 hover:text-indigo-300 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-98"
+            >
+              <FileUp className="h-4 w-4" />
+              Import PDF
+            </button>
+          </div>
         </aside>
 
         {/* Center Sandbox Canvas Workspace (60% width) */}
@@ -644,19 +829,19 @@ export default function SlideEditorPage() {
             >
               {/* Background Slide Image */}
               {activeSlide.isInteractive ? (
-                <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 flex flex-col items-center justify-center text-center p-8 select-none pointer-events-none">
-                  <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                <div className={`w-full h-full ${theme.gradientClass} flex flex-col items-center justify-center text-center p-8 select-none pointer-events-none`}>
+                  <div className={`flex items-center gap-2 mb-2 ${theme.isLight ? 'text-indigo-655' : 'text-indigo-400'}`}>
                     {activeSlide.interactionType === "poll" && <BarChart2 className="h-6 w-6" />}
                     {activeSlide.interactionType === "quiz" && <HelpCircle className="h-6 w-6" />}
                     {activeSlide.interactionType === "wordcloud" && <Sparkles className="h-6 w-6 animate-pulse" />}
                     {activeSlide.interactionType === "opentext" && <MessageSquare className="h-6 w-6" />}
-                    {activeSlide.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-400 fill-yellow-400" />}
+                    {activeSlide.interactionType === "rating" && <Star className="h-6 w-6 text-yellow-500 fill-yellow-500" />}
                     <span className="text-xs font-bold tracking-widest uppercase">{activeSlide.interactionType} SLIDE</span>
                   </div>
-                  <h3 className="text-xl font-bold text-slate-100 max-w-lg leading-snug drop-shadow-md">
+                  <h3 className={`text-xl font-bold ${theme.textClass} max-w-lg leading-snug drop-shadow-md`}>
                     {interactions[0]?.question || "Interactive Question Slide"}
                   </h3>
-                  <div className="mt-4 text-[10px] text-indigo-300 font-semibold uppercase bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full">
+                  <div className={`mt-4 text-[10px] ${theme.isLight ? 'text-indigo-700 bg-indigo-500/10 border-indigo-500/20' : 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20'} font-semibold uppercase border px-3 py-1 rounded-full`}>
                     Auto-Activates Fullscreen on Present
                   </div>
                 </div>
@@ -1018,6 +1203,151 @@ export default function SlideEditorPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Import PDF Modal ── */}
+      {isImportPdfModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl shadow-black/80 space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-100">Import PDF</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Pages will be appended after the last existing slide.</p>
+              </div>
+              {!importingPdf && !importPdfSuccess && (
+                <button
+                  onClick={() => setIsImportPdfModalOpen(false)}
+                  className="p-2 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-all"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {importPdfError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs text-center">
+                {importPdfError}
+              </div>
+            )}
+
+            {importPdfSuccess ? (
+              /* Success State */
+              <div className="py-10 flex flex-col items-center gap-3">
+                <CheckCircle2 className="h-14 w-14 text-emerald-500 animate-bounce" />
+                <p className="text-sm font-bold text-slate-200">Import Complete!</p>
+                <p className="text-xs text-slate-500">Slides added to your presentation.</p>
+              </div>
+            ) : importingPdf ? (
+              /* Processing State */
+              <div className="space-y-5">
+                <div className="flex items-center gap-4">
+                  <Loader2 className="h-9 w-9 text-indigo-500 animate-spin shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">Processing PDF…</p>
+                    <p className="text-xs text-indigo-400 font-medium">{importPdfProgress}</p>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-semibold text-slate-400">
+                    <span>Progress</span>
+                    <span>{importPdfPercent}%</span>
+                  </div>
+                  <div className="w-full bg-slate-950 border border-slate-850 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-300"
+                      style={{ width: `${importPdfPercent}%` }}
+                    />
+                  </div>
+                  {importPdfEta !== null && importPdfEta > 0 && (
+                    <div className="text-right text-xs text-slate-500">
+                      ETA: <span className="font-bold text-slate-400">{importPdfEta}s</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Log Console */}
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Processing Logs</span>
+                  <div className="w-full h-36 bg-slate-950 border border-slate-850 rounded-xl p-3 font-mono text-[10px] text-slate-400 overflow-y-auto space-y-1">
+                    {importPdfLogs.map((line, i) => (
+                      <div key={i} className="leading-relaxed">{line}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Upload State */
+              <div className="space-y-4">
+                {/* Drag & Drop Zone */}
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0];
+                    if (f) validateImportPdf(f);
+                  }}
+                  onClick={() => importPdfInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-800 hover:border-indigo-500/50 bg-slate-950/40 rounded-2xl py-10 px-4 flex flex-col items-center text-center cursor-pointer transition-all"
+                >
+                  <input
+                    type="file"
+                    ref={importPdfInputRef}
+                    accept=".pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) validateImportPdf(f);
+                    }}
+                  />
+                  <div className="p-3 bg-slate-900 border border-slate-850 rounded-2xl mb-3 text-slate-400">
+                    <Upload className="h-7 w-7" />
+                  </div>
+                  {importPdfFile ? (
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-200 flex items-center gap-1.5 justify-center">
+                        <File className="h-4 w-4 text-indigo-400" />
+                        {importPdfFile.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {(importPdfFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-semibold text-slate-400">
+                        Drag &amp; drop your PDF, or <span className="text-indigo-400">browse</span>
+                      </p>
+                      <p className="text-xs text-slate-600 mt-1">PDF only · up to 100 MB</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsImportPdfModalOpen(false)}
+                    className="flex-1 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!importPdfFile}
+                    onClick={handleImportPdf}
+                    className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white py-2.5 rounded-xl text-xs font-semibold transition-all shadow-md shadow-indigo-500/20 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    Import PDF
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
