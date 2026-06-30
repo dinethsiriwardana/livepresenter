@@ -29,6 +29,7 @@ import {
 import { ref as dbRef, onValue, onChildAdded, off } from "firebase/database";
 import { db, rtdb } from "@/lib/firebaseClient";
 import { AnimatePresence, motion } from "framer-motion";
+import { calculateLeaderboard } from "@/lib/leaderboard";
 
 interface Session {
   id: string; // joinCode
@@ -90,6 +91,8 @@ export default function ProjectorCastPage() {
   
   // Real-time Aggregated Responses in RAM (Firestore listen)
   const [responses, setResponses] = useState<ResponseItem[]>([]);
+  const [allResponses, setAllResponses] = useState<any[]>([]);
+  const [qnaList, setQnaList] = useState<any[]>([]);
   
   // Ephemeral Floating Reactions (RTDB listen)
   const [reactions, setReactions] = useState<FloatingEmoji[]>([]);
@@ -197,6 +200,34 @@ export default function ProjectorCastPage() {
       unsubResponses();
     };
   }, [session?.activeInteractionId, session?.currentSlide, session?.presentationId, joinCode]);
+
+  // Listen to ALL responses in the session (for leaderboard calculation)
+  useEffect(() => {
+    if (!joinCode) return;
+    const responsesRef = collection(db, "sessions", joinCode, "responses");
+    const unsubAllResponses = onSnapshot(responsesRef, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllResponses(list);
+    });
+    return () => unsubAllResponses();
+  }, [joinCode]);
+
+  // Listen to Q&A List (for leaderboard calculation)
+  useEffect(() => {
+    if (!joinCode) return;
+    const qnaRef = collection(db, "sessions", joinCode, "qna");
+    const unsubscribe = onSnapshot(qnaRef, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setQnaList(list);
+    });
+    return () => unsubscribe();
+  }, [joinCode]);
+
+  const interactionLeaderboard = React.useMemo(() => {
+    return calculateLeaderboard(allResponses, qnaList);
+  }, [allResponses, qnaList]);
+
+  const isLeaderboardSlide = session && slides.length > 0 && session.currentSlide === slides.length + 1;
 
   // 4. Connect Ephemeral RTDB Listeners (reactions & laser pointer)
   useEffect(() => {
@@ -354,7 +385,7 @@ export default function ProjectorCastPage() {
       </div>
 
       {/* Main aspect-locked slides panel */}
-      {activeSlide ? (
+      {isLeaderboardSlide || activeSlide ? (
         <div
           ref={containerRef}
           className="relative border border-slate-900 bg-black overflow-hidden shadow-2xl transition-all duration-300 flex"
@@ -362,14 +393,131 @@ export default function ProjectorCastPage() {
             width: "90%",
             height: "90%",
             maxWidth: "1400px",
-            aspectRatio: activeSlide.aspectRatio || 1.777,
+            aspectRatio: activeSlide?.aspectRatio || 1.777,
           }}
         >
-          {/* 1. LEFT PANEL: SLIDE IMAGE (Shown if NOT standalone interactive slide) */}
-          {!activeSlide.isInteractive && (
+          {isLeaderboardSlide ? (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-955 p-8 overflow-y-auto w-full h-full">
+              {/* Background Glow */}
+              <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-tr from-indigo-500/10 to-purple-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+
+              <div className="text-center mb-6 z-10">
+                <div className="flex justify-center items-center gap-3 mb-2 animate-in slide-in-from-top duration-300">
+                  <Award className="h-10 w-10 text-yellow-405 animate-bounce" />
+                  <h1 className="text-4xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-200 via-slate-100 to-purple-200">
+                    Session Leaderboard
+                  </h1>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Top engaged participants based on responses and Q&A interactions
+                </p>
+              </div>
+
+              {interactionLeaderboard.length === 0 ? (
+                <div className="text-center py-10 bg-slate-900/40 border border-slate-855 rounded-3xl p-6 max-w-sm w-full z-10">
+                  <Users className="h-10 w-10 text-slate-650 mx-auto mb-3 animate-pulse" />
+                  <h3 className="text-sm font-bold text-slate-350">No Interactions Yet</h3>
+                  <p className="text-[11px] text-slate-550 mt-1.5">
+                    Waiting for participants to answer quiz questions or ask Q&A questions.
+                  </p>
+                </div>
+              ) : (
+                <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-12 gap-8 items-stretch z-10">
+                  {/* Left Podium (top 3) */}
+                  <div className="md:col-span-5 flex flex-col items-center justify-end gap-3 pt-8 min-h-[260px] bg-slate-900/20 border border-slate-900/60 rounded-2xl p-5">
+                    <div className="flex items-end justify-center w-full gap-3 h-full">
+                      {/* 2nd Place */}
+                      {interactionLeaderboard[1] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500 delay-150">
+                          <div className="text-[10px] font-bold text-slate-300 text-center truncate max-w-[80px] mb-1.5">
+                            {interactionLeaderboard[1].name}
+                          </div>
+                          <div className="h-24 w-20 bg-gradient-to-t from-slate-900 to-slate-800/80 border border-slate-700/30 rounded-t-xl flex flex-col items-center justify-between p-2.5 shadow-lg relative">
+                            <span className="absolute -top-5 text-xl">🥈</span>
+                            <div className="text-base font-extrabold text-slate-300">2nd</div>
+                            <div className="text-[10px] font-bold text-indigo-305">{interactionLeaderboard[1].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 1st Place */}
+                      {interactionLeaderboard[0] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500">
+                          <div className="text-xs font-black text-yellow-450 text-center truncate max-w-[90px] mb-1.5">
+                            {interactionLeaderboard[0].name}
+                          </div>
+                          <div className="h-32 w-24 bg-gradient-to-t from-indigo-950/70 to-indigo-900/50 border-2 border-yellow-500/40 rounded-t-2xl flex flex-col items-center justify-between p-3.5 shadow-xl relative">
+                            <span className="absolute -top-7 text-3xl animate-bounce">👑</span>
+                            <div className="text-lg font-black text-yellow-405">1st</div>
+                            <div className="text-xs font-black text-yellow-300">{interactionLeaderboard[0].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 3rd Place */}
+                      {interactionLeaderboard[2] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500 delay-300">
+                          <div className="text-[10px] font-bold text-orange-355 text-center truncate max-w-[80px] mb-1.5">
+                            {interactionLeaderboard[2].name}
+                          </div>
+                          <div className="h-20 w-20 bg-gradient-to-t from-slate-900 to-slate-800/80 border border-slate-700/30 rounded-t-xl flex flex-col items-center justify-between p-2 shadow-lg relative">
+                            <span className="absolute -top-5 text-xl">🥉</span>
+                            <div className="text-sm font-bold text-orange-400">3rd</div>
+                            <div className="text-[10px] font-bold text-indigo-305">{interactionLeaderboard[2].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Table standings (4-10) */}
+                  <div className="md:col-span-7 bg-slate-900/45 backdrop-blur-sm border border-slate-850 rounded-2xl p-5 shadow-xl w-full flex flex-col justify-between max-h-[350px]">
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
+                      Standings
+                    </h3>
+                    <div className="space-y-2 overflow-y-auto pr-1 flex-1">
+                      {interactionLeaderboard.slice(0, 8).map((player, idx) => {
+                        const rank = idx + 1;
+                        return (
+                          <div 
+                            key={player.token}
+                            className={`flex items-center justify-between p-2.5 rounded-lg border text-xs transition-all animate-in fade-in duration-300 delay-${idx * 50} ${
+                              rank === 1 
+                                ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-300" 
+                                : rank === 2 
+                                ? "bg-slate-300/10 border-slate-300/20 text-slate-200" 
+                                : rank === 3 
+                                ? "bg-orange-555/10 border-orange-500/20 text-orange-300" 
+                                : "bg-slate-950/45 border-slate-900 text-slate-350 hover:bg-slate-900/25"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 font-black text-center text-[10px] text-slate-550">{rank}</span>
+                              <span className="font-bold truncate max-w-[150px]">{player.name}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-455">
+                              <span title="Quizzes Correct" className="flex items-center gap-0.5">🎯 {player.quizCorrectCount}</span>
+                              <span title="Total Responses" className="flex items-center gap-0.5">🗳️ {player.responsesCount}</span>
+                              <span title="Questions Asked" className="flex items-center gap-0.5">❓ {player.questionsAskedCount}</span>
+                              <span className="font-extrabold text-xs text-slate-200 min-w-[60px] text-right">
+                                {player.score} pts
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* 1. LEFT PANEL: SLIDE IMAGE (Shown if NOT standalone interactive slide) */}
+              {!activeSlide?.isInteractive && (
             <div className={`relative bg-black flex items-center justify-center transition-all duration-300 ${activeInteraction && activeInteraction.type !== "wordcloud" ? "w-1/2 border-r border-slate-900" : "w-full h-full"}`}>
               <img
-                src={activeSlide.imageUrl}
+                src={activeSlide?.imageUrl}
                 alt="Current Slide View"
                 className="w-full h-full object-contain pointer-events-none select-none"
               />
@@ -450,7 +598,7 @@ export default function ProjectorCastPage() {
           {activeInteraction && activeInteraction.type !== "wordcloud" && (
             <div
               className={`flex flex-col justify-center p-8 bg-slate-950/85 backdrop-blur-xl ${
-                activeSlide.isInteractive
+                activeSlide?.isInteractive
                   ? "w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 p-16"
                   : "w-1/2 h-full"
               }`}
@@ -463,7 +611,7 @@ export default function ProjectorCastPage() {
                   {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" />}
                   <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
                 </div>
-                <h2 className={`font-extrabold text-slate-100 leading-snug mb-8 ${activeSlide.isInteractive ? "text-3xl" : "text-lg"}`}>
+                <h2 className={`font-extrabold text-slate-100 leading-snug mb-8 ${activeSlide?.isInteractive ? "text-3xl" : "text-lg"}`}>
                   {activeInteraction.question}
                 </h2>
               </div>
@@ -551,6 +699,8 @@ export default function ProjectorCastPage() {
                 )}
               </div>
             </div>
+          )}
+          </>
           )}
         </div>
       ) : (

@@ -26,7 +26,9 @@ import {
   Share2,
   Copy,
   Check,
-  X
+  X,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
 import { 
   doc, 
@@ -42,6 +44,7 @@ import {
 import { db, rtdb } from "@/lib/firebaseClient";
 import { ref as dbRef, onChildAdded, off } from "firebase/database";
 import { AnimatePresence, motion } from "framer-motion";
+import { calculateLeaderboard } from "@/lib/leaderboard";
 
 interface Session {
   id: string; // joinCode
@@ -94,6 +97,7 @@ export default function PresenterRemotePage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [showSlidePickerPopup, setShowSlidePickerPopup] = useState(false);
 
   const leaderboard = React.useMemo(() => {
     const scores: Record<string, { name: string; score: number }> = {};
@@ -127,6 +131,12 @@ export default function PresenterRemotePage() {
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
   }, [allResponses]);
+
+  const interactionLeaderboard = React.useMemo(() => {
+    return calculateLeaderboard(allResponses, qnaList);
+  }, [allResponses, qnaList]);
+
+  const isLeaderboardSlide = session && slides.length > 0 && session.currentSlide === slides.length + 1;
 
   const handleCopyLink = () => {
     const joinUrl = `${window.location.protocol}//${window.location.host}/join?code=${sessionId}`;
@@ -327,7 +337,7 @@ export default function PresenterRemotePage() {
   };
 
   const handleNextSlide = () => {
-    if (!session || session.currentSlide >= slides.length) return;
+    if (!session || session.currentSlide >= slides.length + 1) return;
     const targetIdx = session.currentSlide; // 0-indexed next index
     const nextSlide = slides[targetIdx];
     const autoInteractId = (nextSlide && nextSlide.isInteractive) ? "primary" : null;
@@ -432,8 +442,123 @@ export default function PresenterRemotePage() {
         /* FULLSCREEN PRESENTER PRESENTATION LAYOUT */
         <div className="relative w-screen h-screen bg-slate-950 flex items-center justify-center overflow-hidden animate-in fade-in duration-300">
           
-          {/* Active slide image */}
-          {currentSlideData ? (
+          {/* Active slide or Leaderboard */}
+          {isLeaderboardSlide ? (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950 p-8 overflow-y-auto w-full h-full">
+              {/* Background Glow */}
+              <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-tr from-indigo-500/10 to-purple-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
+
+              <div className="text-center mb-10 z-10">
+                <div className="flex justify-center items-center gap-3 mb-2 animate-in slide-in-from-top duration-300">
+                  <Award className="h-12 w-12 text-yellow-400 animate-bounce" />
+                  <h1 className="text-5xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-200 via-slate-100 to-purple-200">
+                    Session Leaderboard
+                  </h1>
+                </div>
+                <p className="text-sm text-slate-400">
+                  Top engaged participants based on responses and Q&A interactions
+                </p>
+              </div>
+
+              {interactionLeaderboard.length === 0 ? (
+                <div className="text-center py-12 bg-slate-900/40 border border-slate-850 rounded-3xl p-8 max-w-md w-full z-10">
+                  <Users className="h-12 w-12 text-slate-600 mx-auto mb-4 animate-pulse" />
+                  <h3 className="text-lg font-bold text-slate-350">No Interactions Yet</h3>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Waiting for participants to answer quiz questions or ask Q&A questions.
+                  </p>
+                </div>
+              ) : (
+                <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-12 gap-10 items-stretch z-10">
+                  {/* Left Podium (top 3) */}
+                  <div className="md:col-span-5 flex flex-col items-center justify-end gap-4 pt-12 min-h-[320px] bg-slate-900/20 border border-slate-900/60 rounded-3xl p-6">
+                    <div className="flex items-end justify-center w-full gap-3 h-full">
+                      {/* 2nd Place */}
+                      {interactionLeaderboard[1] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500 delay-150">
+                          <div className="text-xs font-bold text-slate-300 text-center truncate max-w-[90px] mb-2">
+                            {interactionLeaderboard[1].name}
+                          </div>
+                          <div className="h-28 w-24 bg-gradient-to-t from-slate-900 to-slate-800/80 border border-slate-700/30 rounded-t-2xl flex flex-col items-center justify-between p-3 shadow-lg relative">
+                            <span className="absolute -top-6 text-2xl">🥈</span>
+                            <div className="text-lg font-extrabold text-slate-300">2nd</div>
+                            <div className="text-xs font-bold text-indigo-300">{interactionLeaderboard[1].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 1st Place */}
+                      {interactionLeaderboard[0] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500">
+                          <div className="text-sm font-black text-yellow-450 text-center truncate max-w-[100px] mb-2">
+                            {interactionLeaderboard[0].name}
+                          </div>
+                          <div className="h-36 w-28 bg-gradient-to-t from-indigo-950/70 to-indigo-900/50 border-2 border-yellow-500/40 rounded-t-3xl flex flex-col items-center justify-between p-4 shadow-xl relative">
+                            <span className="absolute -top-8 text-4xl animate-bounce">👑</span>
+                            <div className="text-xl font-black text-yellow-405">1st</div>
+                            <div className="text-sm font-black text-yellow-300">{interactionLeaderboard[0].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 3rd Place */}
+                      {interactionLeaderboard[2] && (
+                        <div className="flex flex-col items-center flex-1 animate-in slide-in-from-bottom duration-500 delay-300">
+                          <div className="text-xs font-bold text-orange-355 text-center truncate max-w-[90px] mb-2">
+                            {interactionLeaderboard[2].name}
+                          </div>
+                          <div className="h-22 w-24 bg-gradient-to-t from-slate-900 to-slate-800/80 border border-slate-700/30 rounded-t-2xl flex flex-col items-center justify-between p-2.5 shadow-lg relative">
+                            <span className="absolute -top-6 text-2xl">🥉</span>
+                            <div className="text-base font-bold text-orange-400">3rd</div>
+                            <div className="text-xs font-bold text-indigo-300">{interactionLeaderboard[2].score} pts</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Table standings (4-10) */}
+                  <div className="md:col-span-7 bg-slate-900/45 backdrop-blur-sm border border-slate-850 rounded-3xl p-6 shadow-xl w-full flex flex-col justify-between max-h-[450px]">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
+                      Standings
+                    </h3>
+                    <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
+                      {interactionLeaderboard.slice(0, 8).map((player, idx) => {
+                        const rank = idx + 1;
+                        return (
+                          <div 
+                            key={player.token}
+                            className={`flex items-center justify-between p-3 rounded-xl border text-sm transition-all animate-in fade-in duration-300 delay-${idx * 50} ${
+                              rank === 1 
+                                ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-300" 
+                                : rank === 2 
+                                ? "bg-slate-300/10 border-slate-300/20 text-slate-200" 
+                                : rank === 3 
+                                ? "bg-orange-555/10 border-orange-500/20 text-orange-300" 
+                                : "bg-slate-950/45 border-slate-900 text-slate-350 hover:bg-slate-900/25"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="w-5 font-black text-center text-xs text-slate-500">{rank}</span>
+                              <span className="font-bold truncate max-w-[180px]">{player.name}</span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs font-semibold text-slate-455">
+                              <span title="Quizzes Correct" className="flex items-center gap-0.5">🎯 {player.quizCorrectCount}</span>
+                              <span title="Total Responses" className="flex items-center gap-0.5">🗳️ {player.responsesCount}</span>
+                              <span title="Questions Asked" className="flex items-center gap-0.5">❓ {player.questionsAskedCount}</span>
+                              <span className="font-extrabold text-sm text-slate-200 min-w-[70px] text-right">
+                                {player.score} pts
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : currentSlideData ? (
             currentSlideData.imageUrl ? (
               <img 
                 src={currentSlideData.imageUrl} 
@@ -930,6 +1055,60 @@ export default function PresenterRemotePage() {
             </AnimatePresence>
           </div>
 
+          {/* Floating Quick Slide Navigation Popover */}
+          {showSlidePickerPopup && (
+            <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-50 bg-slate-950/95 backdrop-blur-xl border border-slate-800 p-4 rounded-3xl shadow-2xl w-80 max-h-72 overflow-y-auto flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200">
+              <div className="flex items-center justify-between border-b border-slate-900 pb-2 mb-1">
+                <span className="text-[10px] font-bold text-slate-550 uppercase tracking-wider">Quick Navigation</span>
+                <button onClick={() => setShowSlidePickerPopup(false)} className="text-slate-500 hover:text-slate-350">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-2 overflow-y-auto pr-1">
+                {slides.map((slide, idx) => {
+                  const slideNum = idx + 1;
+                  const isCurrent = session.currentSlide === slideNum;
+                  return (
+                    <button
+                      key={slide.id}
+                      onClick={() => {
+                        const autoInteractId = (slide && slide.isInteractive) ? "primary" : null;
+                        updateSession({ currentSlide: slideNum, activeInteractionId: autoInteractId });
+                        setShowSlidePickerPopup(false);
+                      }}
+                      className={`aspect-square rounded-xl border flex flex-col items-center justify-center font-extrabold text-xs transition-all ${
+                        isCurrent
+                          ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 shadow-lg shadow-indigo-500/5"
+                          : "bg-slate-900/40 border-slate-850 text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
+                      }`}
+                    >
+                      <span className="text-[8px] text-slate-500 font-semibold mb-0.5">SLIDE</span>
+                      <span className="text-sm">{slideNum}</span>
+                      {slide.isInteractive && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 mt-1" />
+                      )}
+                    </button>
+                  );
+                })}
+                
+                <button
+                  onClick={() => {
+                    updateSession({ currentSlide: slides.length + 1, activeInteractionId: null });
+                    setShowSlidePickerPopup(false);
+                  }}
+                  className={`col-span-4 rounded-xl border py-2 px-3 font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                    session.currentSlide === slides.length + 1
+                      ? "bg-indigo-500/10 border-indigo-500 text-indigo-300"
+                      : "bg-slate-900/40 border-slate-850 text-slate-400 hover:bg-slate-900/80 hover:text-slate-200"
+                  }`}
+                >
+                  <Award className="h-4 w-4" />
+                  Session Leaderboard
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Floating Remote Toolbar */}
           <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-40 bg-slate-955/90 backdrop-blur-md border border-slate-800 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-4 transition-all opacity-30 hover:opacity-100 hover:scale-105 duration-200">
             <button
@@ -940,13 +1119,23 @@ export default function PresenterRemotePage() {
               <ChevronLeft className="h-5 w-5" />
             </button>
             
-            <span className="text-xs font-bold text-slate-300 select-none">
-              Slide {session.currentSlide} of {slides.length}
-            </span>
+            <button
+              onClick={() => setShowSlidePickerPopup(!showSlidePickerPopup)}
+              className="text-xs font-bold text-slate-300 hover:text-white bg-slate-900/40 border border-slate-800/85 hover:border-slate-700 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 group select-none"
+            >
+              <span>
+                {isLeaderboardSlide ? "Leaderboard" : `Slide ${session.currentSlide} of ${slides.length}`}
+              </span>
+              {showSlidePickerPopup ? (
+                <ChevronDown className="h-3 w-3 text-slate-500 group-hover:text-slate-350" />
+              ) : (
+                <ChevronUp className="h-3 w-3 text-slate-500 group-hover:text-slate-350" />
+              )}
+            </button>
 
             <button
               onClick={handleNextSlide}
-              disabled={session.currentSlide >= slides.length}
+              disabled={session.currentSlide >= slides.length + 1}
               className="p-1.5 hover:bg-slate-900 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
             >
               <ChevronRight className="h-5 w-5" />
@@ -1337,13 +1526,26 @@ export default function PresenterRemotePage() {
                 Active Slide
               </span>
               <span className="bg-slate-800 text-slate-300 px-3 py-1 rounded-full text-xs font-extrabold">
-                {session.currentSlide} / {slides.length}
+                {isLeaderboardSlide ? "Leaderboard" : `${session.currentSlide} / ${slides.length}`}
               </span>
             </div>
 
             {/* Current Slide Frame Preview */}
             <div className="aspect-[16/9] w-full max-w-lg bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-xl mb-6 relative">
-              {currentSlideData && currentSlideData.imageUrl ? (
+              {isLeaderboardSlide ? (
+                <div className="w-full h-full bg-gradient-to-br from-indigo-950/70 to-purple-950/80 flex flex-col items-center justify-center p-4 text-center">
+                  <Award className="h-8 w-8 text-yellow-400 mb-2 animate-bounce" />
+                  <span className="text-sm font-black text-slate-200">Session Leaderboard</span>
+                  <span className="text-[10px] text-slate-555 mt-1">
+                    {interactionLeaderboard.length} participants registered
+                  </span>
+                  {interactionLeaderboard[0] && (
+                    <div className="mt-3 text-xs bg-slate-900/60 border border-slate-800 px-3 py-1 rounded-full text-yellow-300 font-bold">
+                      👑 1st: {interactionLeaderboard[0].name} ({interactionLeaderboard[0].score} pts)
+                    </div>
+                  )}
+                </div>
+              ) : currentSlideData && currentSlideData.imageUrl ? (
                 <img
                   src={currentSlideData.imageUrl}
                   alt="Current slide"
@@ -1357,22 +1559,33 @@ export default function PresenterRemotePage() {
             </div>
 
             {/* Giant Navigation Buttons */}
-            <div className="flex gap-4 w-full max-w-md">
+            <div className="flex flex-col gap-3 w-full max-w-md">
+              <div className="flex gap-4 w-full">
+                <button
+                  onClick={handlePrevSlide}
+                  disabled={session.currentSlide <= 1}
+                  className="flex-1 bg-slate-905 hover:bg-slate-850 border border-slate-800 text-slate-300 rounded-2xl py-4 font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                  Previous
+                </button>
+                <button
+                  onClick={handleNextSlide}
+                  disabled={session.currentSlide >= slides.length + 1}
+                  className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-650 hover:from-indigo-650 hover:to-purple-750 text-white rounded-2xl py-4 font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-indigo-500/15 active:scale-98 disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  Next
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+
               <button
-                onClick={handlePrevSlide}
-                disabled={session.currentSlide <= 1}
-                className="flex-1 bg-slate-905 hover:bg-slate-850 border border-slate-800 text-slate-300 rounded-2xl py-4 font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-30 disabled:pointer-events-none"
+                onClick={() => updateSession({ currentSlide: slides.length + 1, activeInteractionId: null })}
+                disabled={session.currentSlide === slides.length + 1}
+                className="w-full bg-slate-900/60 hover:bg-indigo-950/30 border border-slate-800 hover:border-indigo-500/30 text-indigo-400 rounded-2xl py-3.5 font-bold flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-30 disabled:pointer-events-none shadow-md shadow-indigo-950/20"
               >
-                <ChevronLeft className="h-5 w-5" />
-                Previous
-              </button>
-              <button
-                onClick={handleNextSlide}
-                disabled={session.currentSlide >= slides.length}
-                className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-2xl py-4 font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-indigo-500/15 active:scale-98 disabled:opacity-30 disabled:pointer-events-none"
-              >
-                Next
-                <ChevronRight className="h-5 w-5" />
+                <Award className="h-4.5 w-4.5 text-indigo-400 animate-pulse" />
+                Jump to Session Leaderboard
               </button>
             </div>
           </div>

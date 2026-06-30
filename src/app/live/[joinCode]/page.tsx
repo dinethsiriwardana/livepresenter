@@ -14,7 +14,8 @@ import {
   MessageSquare,
   Presentation,
   Sparkles,
-  Square
+  Square,
+  Award
 } from "lucide-react";
 import { 
   doc, 
@@ -25,10 +26,12 @@ import {
   where, 
   getDocs,
   updateDoc,
-  increment
+  increment,
+  getDoc
 } from "firebase/firestore";
 import { ref as dbRef, push } from "firebase/database";
 import { db, rtdb } from "@/lib/firebaseClient";
+import { calculateLeaderboard } from "@/lib/leaderboard";
 
 interface Session {
   id: string; // joinCode
@@ -88,6 +91,8 @@ export default function AudienceLivePage() {
   // Active slide details & responses aggregation
   const [activeSlide, setActiveSlide] = useState<{ imageUrl?: string; isInteractive?: boolean } | null>(null);
   const [responses, setResponses] = useState<any[]>([]);
+  const [totalSlides, setTotalSlides] = useState<number>(0);
+  const [allResponses, setAllResponses] = useState<any[]>([]);
 
   // Check anonymous participant state
   useEffect(() => {
@@ -111,6 +116,14 @@ export default function AudienceLivePage() {
       const sessionData = { id: docSnap.id, ...docSnap.data() } as Session;
       setSession(sessionData);
       setLoading(false);
+
+      if (sessionData.presentationId && !totalSlides) {
+        getDoc(doc(db, "presentations", sessionData.presentationId)).then(presSnap => {
+          if (presSnap.exists()) {
+            setTotalSlides(presSnap.data()?.slideCount || 0);
+          }
+        });
+      }
     });
 
     // Simple increment participant count once
@@ -257,6 +270,23 @@ export default function AudienceLivePage() {
     });
     return () => unsubscribe();
   }, [joinCode]);
+
+  // Listen to ALL responses in the session (for leaderboard calculation)
+  useEffect(() => {
+    if (!joinCode) return;
+    const responsesRef = collection(db, "sessions", joinCode, "responses");
+    const unsubAllResponses = onSnapshot(responsesRef, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllResponses(list);
+    });
+    return () => unsubAllResponses();
+  }, [joinCode]);
+
+  const interactionLeaderboard = React.useMemo(() => {
+    return calculateLeaderboard(allResponses, qnaList);
+  }, [allResponses, qnaList]);
+
+  const isLeaderboardSlide = session && totalSlides > 0 && session.currentSlide === totalSlides + 1;
 
   const handleSubmitResponse = async (value: any) => {
     if (!session || !activeInteraction || !user) return;
@@ -416,7 +446,103 @@ export default function AudienceLivePage() {
 
       {/* 3. Main Center Overlay (Interactive questions / results) */}
       <main className="relative z-10 flex-1 flex items-center justify-center p-4">
-        {activeInteraction ? (
+        {isLeaderboardSlide ? (
+          <div className="bg-slate-955/90 backdrop-blur-md border border-slate-850 rounded-3xl p-6 shadow-2xl max-w-md w-full overflow-y-auto max-h-[80vh] space-y-6 animate-in fade-in zoom-in-95 duration-205">
+            <div className="text-center space-y-2">
+              <Award className="h-10 w-10 text-yellow-400 mx-auto animate-bounce" />
+              <h2 className="text-xl font-extrabold tracking-tight text-slate-105">
+                Presentation Concluded
+              </h2>
+              <p className="text-xs text-slate-500">
+                Here are the final standings for this live session.
+              </p>
+            </div>
+
+            {/* Personal Performance Card */}
+            {(() => {
+              const myRankIndex = interactionLeaderboard.findIndex(p => p.token === user?.uid);
+              if (myRankIndex === -1) {
+                return (
+                  <div className="bg-slate-900/40 border border-slate-850 rounded-2xl p-4 text-center">
+                    <p className="text-xs text-slate-450">
+                      No interactions recorded for you in this session.
+                    </p>
+                  </div>
+                );
+              }
+              const myRank = myRankIndex + 1;
+              const myInfo = interactionLeaderboard[myRankIndex];
+              const medal = myRank === 1 ? "👑" : myRank === 2 ? "🥈" : myRank === 3 ? "🥉" : "🎖️";
+
+              return (
+                <div className="bg-gradient-to-br from-indigo-955/40 via-slate-900/30 to-purple-955/40 border border-indigo-500/20 rounded-2xl p-5 text-center space-y-3 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl pointer-events-none" />
+                  <div className="text-3xl">{medal}</div>
+                  <div>
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Your Standing</h4>
+                    <p className="text-2xl font-black text-slate-100 mt-1">Rank #{myRank}</p>
+                    <p className="text-xs font-bold text-slate-400 mt-0.5">{myInfo.score} total points</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 border-t border-slate-900 pt-3 mt-1 text-[10px] text-slate-455 font-semibold">
+                    <div className="space-y-1">
+                      <span className="block text-slate-550">🎯 Quiz Correct</span>
+                      <span className="text-xs font-bold text-emerald-455">{myInfo.quizCorrectCount}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="block text-slate-550">🗳️ Responses</span>
+                      <span className="text-xs font-bold text-slate-205">{myInfo.responsesCount}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="block text-slate-550">❓ Q&A Asked</span>
+                      <span className="text-xs font-bold text-indigo-305">{myInfo.questionsAskedCount}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Standings List */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Top Standings
+              </h3>
+              {interactionLeaderboard.length === 0 ? (
+                <p className="text-xs text-slate-650 text-center py-4 italic">No rankings registered</p>
+              ) : (
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {interactionLeaderboard.slice(0, 10).map((player, idx) => {
+                    const rank = idx + 1;
+                    const isMe = player.token === user?.uid;
+                    return (
+                      <div 
+                        key={player.token}
+                        className={`flex items-center justify-between p-3 rounded-xl border text-xs transition-all ${
+                          isMe 
+                            ? "bg-indigo-500/10 border-indigo-500/35 text-indigo-305 font-bold shadow-md shadow-indigo-500/5" 
+                            : rank === 1 
+                            ? "bg-yellow-500/5 border-yellow-500/10 text-yellow-350"
+                            : "bg-slate-950/50 border-slate-900 text-slate-350"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-4 font-black text-center text-[10px] text-slate-500">{rank}</span>
+                          <span className="truncate max-w-[120px]">{player.name} {isMe && "(You)"}</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 font-medium text-slate-550">
+                          <span>🎯 {player.quizCorrectCount}</span>
+                          <span>🗳️ {player.responsesCount}</span>
+                          <span className={`font-bold ${isMe ? "text-indigo-300 text-sm" : "text-slate-300"}`}>
+                            {player.score} pts
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeInteraction ? (
           <div className="bg-slate-955/90 backdrop-blur-md border border-slate-850 rounded-3xl p-6 shadow-2xl max-w-md w-full overflow-y-auto max-h-[70vh] space-y-6 animate-in fade-in zoom-in-95 duration-200">
             {hasSubmitted ? (
               activeInteraction.type === "wordcloud" ? (
@@ -697,9 +823,9 @@ export default function AudienceLivePage() {
           </div>
         ) : (
           /* Simple overlay showing the active slide visually */
-          <div className="absolute top-20 bg-slate-950/65 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-900 text-[10px] font-semibold text-indigo-300 flex items-center gap-2 shadow-lg">
+          <div className="absolute top-20 bg-slate-955/65 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-900 text-[10px] font-semibold text-indigo-350 flex items-center gap-2 shadow-lg">
             <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping" />
-            <span>Slide {session.currentSlide} of Presentation</span>
+            <span>{isLeaderboardSlide ? "Leaderboard" : `Slide ${session.currentSlide} of Presentation`}</span>
           </div>
         )}
       </main>
