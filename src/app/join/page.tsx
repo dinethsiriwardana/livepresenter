@@ -23,8 +23,8 @@ export default function JoinPage() {
     setLoading(true);
 
     const formattedCode = code.trim().toUpperCase();
-    if (!formattedCode || formattedCode.length < 4) {
-      setError("Please enter a valid room code.");
+    if (!formattedCode || formattedCode.length !== 6) {
+      setError("Please enter a valid 6-character room code.");
       setLoading(false);
       return;
     }
@@ -97,9 +97,9 @@ export default function JoinPage() {
               </label>
               <input
                 type="text"
-                maxLength={8}
+                maxLength={6}
                 required
-                placeholder="e.g. ABCD"
+                placeholder="e.g. A1B2C3"
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
                 className="w-full bg-slate-950/80 border border-slate-800 focus:border-emerald-500 rounded-xl py-4 text-center font-bold text-2xl tracking-widest text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-700 placeholder:text-base placeholder:tracking-normal"

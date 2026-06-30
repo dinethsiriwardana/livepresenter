@@ -26,9 +26,14 @@ import {
   doc, 
   orderBy, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  getDoc,
+  setDoc,
+  updateDoc,
+  writeBatch
 } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
+import { db, rtdb } from "@/lib/firebaseClient";
+import { ref as dbRef, remove as rtdbRemove } from "firebase/database";
 
 interface Workspace {
   id: string;
@@ -43,8 +48,18 @@ interface PresentationDeck {
   slideCount: number;
   status: "processing" | "ready" | "failed";
   pdfUrl?: string;
+  joinCode?: string;
   createdAt: any;
 }
+
+const generate6DigitCode = (): string => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
 
 export default function DashboardPage() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -153,29 +168,53 @@ export default function DashboardPage() {
   const handleCreateSession = async (deckId: string) => {
     if (!user) return;
     try {
-      // Generate 4-letter join code (e.g. QWER)
-      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      let joinCode = "";
-      for (let i = 0; i < 4; i++) {
-        joinCode += chars.charAt(Math.floor(Math.random() * chars.length));
+      // 1. Get presentation doc to check if it has joinCode
+      const presentationRef = doc(db, "presentations", deckId);
+      const presentationSnap = await getDoc(presentationRef);
+      let joinCode = presentationSnap.exists() ? presentationSnap.data()?.joinCode : null;
+
+      // 2. If it does not have a joinCode, generate one, save it to the presentation doc
+      if (!joinCode) {
+        let uniqueCode = "";
+        let attempts = 0;
+        while (attempts < 5) {
+          const tempCode = generate6DigitCode();
+          const q = query(collection(db, "presentations"), where("joinCode", "==", tempCode));
+          const snap = await getDocs(q);
+          if (snap.empty) {
+            uniqueCode = tempCode;
+            break;
+          }
+          attempts++;
+        }
+        joinCode = uniqueCode || generate6DigitCode();
+        await updateDoc(presentationRef, { joinCode });
       }
 
-      const sessionsRef = collection(db, "sessions");
-      await addDoc(sessionsRef, {
-        presentationId: deckId,
-        presenterId: user.uid,
-        isActive: true,
-        currentSlide: 1,
-        activeInteractionId: null,
-        participantCount: 0,
-        createdAt: serverTimestamp(),
-        // We write to joinCode doc ID directly or set it as a field.
-        // It's much easier to set joinCode as the actual document ID so we can query it instantly!
-      });
+      // 3. Clear any existing responses or qna for this joinCode (in case we are reusing it)
+      const responsesRef = collection(db, "sessions", joinCode, "responses");
+      const responsesSnap = await getDocs(responsesRef);
+      const qnaRef = collection(db, "sessions", joinCode, "qna");
+      const qnaSnap = await getDocs(qnaRef);
 
-      // Actually, let's write to doc(db, "sessions", joinCode) directly!
-      const { doc: firestoreDoc, setDoc: firestoreSetDoc } = await import("firebase/firestore");
-      await firestoreSetDoc(firestoreDoc(db, "sessions", joinCode), {
+      const batch = writeBatch(db);
+      responsesSnap.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      qnaSnap.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+
+      // 4. Clear reactions & drawings in RTDB for this joinCode
+      try {
+        await rtdbRemove(dbRef(rtdb, `sessions/${joinCode}`));
+      } catch (err) {
+        console.error("Error clearing RTDB session node:", err);
+      }
+
+      // 5. Initialize/reset session document directly with setDoc (avoiding duplicate addDoc write)
+      await setDoc(doc(db, "sessions", joinCode), {
         presentationId: deckId,
         presenterId: user.uid,
         coHosts: [],

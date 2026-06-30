@@ -9,12 +9,35 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebaseClient";
 import Link from "next/link";
 
+const generate6DigitCode = (): string => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
 export default function NewPresentationPage() {
   const { user } = useAuth();
   const router = useRouter();
 
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const generateUniqueJoinCode = async (): Promise<string> => {
+    let attempts = 0;
+    while (attempts < 5) {
+      const code = generate6DigitCode();
+      const q = query(collection(db, "presentations"), where("joinCode", "==", code));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        return code;
+      }
+      attempts++;
+    }
+    return generate6DigitCode();
+  };
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -133,12 +156,15 @@ export default function NewPresentationPage() {
         const deckId = newDeckRef.id;
         log(`Provisioning template ID: ${deckId} in Firestore`);
 
+        const joinCode = await generateUniqueJoinCode();
+
         await setDoc(newDeckRef, {
           workspaceId: activeWorkspaceId,
           title: title,
           ownerId: user.uid,
           slideCount: slideCount,
           status: "processing",
+          joinCode: joinCode,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -264,12 +290,14 @@ export default function NewPresentationPage() {
 
       // Initialize the presentation entry in "processing" state
       log("Initializing document record in Cloud Firestore...");
+      const joinCode = await generateUniqueJoinCode();
       await setDoc(newDeckRef, {
         workspaceId: activeWorkspaceId,
         title: presentationTitle,
         ownerId: user.uid,
         slideCount: numPages,
         status: "processing",
+        joinCode: joinCode,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
