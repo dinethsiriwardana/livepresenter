@@ -22,7 +22,9 @@ import {
   Video,
   PenTool,
   Loader2,
-  Sparkles
+  Sparkles,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
 import { 
   doc, 
@@ -101,6 +103,10 @@ export default function SlideEditorPage() {
   const [newSlideQuestion, setNewSlideQuestion] = useState("");
   const [newSlideOptions, setNewSlideOptions] = useState<string[]>(["Option A", "Option B"]);
   const [addingSlide, setAddingSlide] = useState(false);
+
+  // Drag and drop / reordering states
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const handleAddSlide = async () => {
     if (newSlideType === "content" && !newSlideImage) {
@@ -253,6 +259,114 @@ export default function SlideEditorPage() {
     } finally {
       setGeneratingAi(false);
     }
+  };
+
+  const handleReorder = async (startIndex: number, endIndex: number) => {
+    if (
+      startIndex === endIndex || 
+      startIndex < 0 || 
+      endIndex < 0 || 
+      startIndex >= slides.length || 
+      endIndex >= slides.length
+    ) return;
+    
+    // 1. Optimistic UI update
+    const reorderedSlides = [...slides];
+    const [removed] = reorderedSlides.splice(startIndex, 1);
+    reorderedSlides.splice(endIndex, 0, removed);
+    
+    setSlides(reorderedSlides);
+
+    // Track selection index
+    const currentSelected = slides.find(s => s.id === selectedSlideId);
+    let newSelectedId = selectedSlideId;
+    if (currentSelected) {
+      const foundIdx = reorderedSlides.findIndex(
+        s => s.imageUrl === currentSelected.imageUrl && 
+             s.notes === currentSelected.notes && 
+             s.thumbnailUrl === currentSelected.thumbnailUrl
+      );
+      if (foundIdx !== -1) {
+        newSelectedId = (foundIdx + 1).toString();
+        setSelectedSlideId(newSelectedId);
+      }
+    }
+
+    try {
+      // 2. Fetch interactions for all affected slides
+      const start = Math.min(startIndex, endIndex);
+      const end = Math.max(startIndex, endIndex);
+      
+      const interactionsMap: { [slideId: string]: any[] } = {};
+      
+      for (let i = start; i <= end; i++) {
+        const slideId = slides[i].id;
+        const interactionsRef = collection(db, "presentations", deckId, "slides", slideId, "interactions");
+        const snap = await getDocs(interactionsRef);
+        interactionsMap[slideId] = snap.docs.map(d => ({
+          id: d.id,
+          data: d.data()
+        }));
+      }
+      
+      // 3. Perform batch updates
+      const { writeBatch } = await import("firebase/firestore");
+      const batch = writeBatch(db);
+      
+      for (let j = start; j <= end; j++) {
+        const targetSlideId = (j + 1).toString();
+        const sourceSlide = reorderedSlides[j];
+        
+        // Update slide document metadata
+        const slideDocRef = doc(db, "presentations", deckId, "slides", targetSlideId);
+        const { id, ...slideData } = sourceSlide;
+        batch.set(slideDocRef, slideData);
+        
+        // Delete all interactions in the target slide document first
+        const existingInteractions = interactionsMap[targetSlideId] || [];
+        for (const inter of existingInteractions) {
+          const interRef = doc(db, "presentations", deckId, "slides", targetSlideId, "interactions", inter.id);
+          batch.delete(interRef);
+        }
+        
+        // Write source slide's interactions into the target slide document
+        const sourceInteractions = interactionsMap[sourceSlide.id] || [];
+        for (const inter of sourceInteractions) {
+          const interRef = doc(db, "presentations", deckId, "slides", targetSlideId, "interactions", inter.id);
+          batch.set(interRef, inter.data);
+        }
+      }
+      
+      await batch.commit();
+      console.log("Successfully reordered slides in Firestore.");
+    } catch (err: any) {
+      console.error("Firestore reorder failed, reverting:", err);
+      alert("Failed to save slide order: " + err.message);
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== index) {
+      handleReorder(draggedIndex, index);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   // Redirect if not logged in
@@ -426,26 +540,67 @@ export default function SlideEditorPage() {
           </div>
           <div className="flex-1 overflow-y-auto space-y-3 scrollbar-thin pr-1">
             {slides.map((slide, index) => (
-              <button
+              <div
                 key={slide.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
                 onClick={() => setSelectedSlideId(slide.id)}
-                className={`w-full relative group rounded-2xl border-2 overflow-hidden transition-all ${
+                className={`w-full relative group rounded-2xl border-2 overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
                   selectedSlideId === slide.id
                     ? "border-indigo-500 shadow-md shadow-indigo-500/10 bg-indigo-500/5"
-                    : "border-slate-850 hover:border-slate-700 bg-slate-900/35"
-                }`}
+                    : dragOverIndex === index
+                      ? "border-indigo-400 bg-slate-800/50 scale-102"
+                      : "border-slate-850 hover:border-slate-700 bg-slate-900/35"
+                } ${draggedIndex === index ? "opacity-30 scale-98" : ""}`}
               >
                 <div className="aspect-[16/9] w-full bg-slate-950 relative">
-                  <img
-                    src={slide.thumbnailUrl}
-                    alt={`Slide ${index + 1}`}
-                    className="w-full h-full object-contain"
-                  />
+                  {slide.thumbnailUrl ? (
+                    <img
+                      src={slide.thumbnailUrl}
+                      alt={`Slide ${index + 1}`}
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-slate-950 flex items-center justify-center text-[10px] text-slate-500">
+                      Interactive
+                    </div>
+                  )}
                   <div className="absolute bottom-2 left-2 h-5 min-w-[20px] px-1 bg-black/60 backdrop-blur-sm rounded-lg flex items-center justify-center text-[10px] font-semibold text-slate-350">
                     {index + 1}
                   </div>
+
+                  {/* Reorder Buttons (Move Up / Down) */}
+                  <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    {index > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleReorder(index, index - 1);
+                        }}
+                        title="Move Up"
+                        className="p-1 bg-slate-950/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90"
+                      >
+                        <ChevronUp className="h-3 w-3" />
+                      </button>
+                    )}
+                    {index < slides.length - 1 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleReorder(index, index + 1);
+                        }}
+                        title="Move Down"
+                        className="p-1 bg-slate-950/90 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-md border border-slate-800 transition-all active:scale-90"
+                      >
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
           
@@ -494,11 +649,17 @@ export default function SlideEditorPage() {
                   </div>
                 </div>
               ) : (
-                <img
-                  src={activeSlide.imageUrl}
-                  alt="Active Slide Preview"
-                  className="w-full h-full object-contain pointer-events-none select-none"
-                />
+                activeSlide.imageUrl ? (
+                  <img
+                    src={activeSlide.imageUrl}
+                    alt="Active Slide Preview"
+                    className="w-full h-full object-contain pointer-events-none select-none"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-slate-950 flex items-center justify-center text-xs text-slate-500">
+                    Interactive Content
+                  </div>
+                )
               )}
 
               {/* Overlaid Interaction Badges */}

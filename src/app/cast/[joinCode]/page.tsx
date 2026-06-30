@@ -12,7 +12,10 @@ import {
   Sparkles,
   QrCode,
   Loader2,
-  Star
+  Star,
+  Maximize,
+  Minimize,
+  Presentation
 } from "lucide-react";
 import { 
   doc, 
@@ -95,6 +98,30 @@ export default function ProjectorCastPage() {
   const [laserPointer, setLaserPointer] = useState<{ x: number; y: number; active: boolean } | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => {
+        console.error("Error enabling fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   // 1. Fetch Session & Slide Metadata
   useEffect(() => {
@@ -249,10 +276,42 @@ export default function ProjectorCastPage() {
   const aggregatedTallies = getAggregatedData();
   const wordCloudWords = getWordCloudData();
 
+  if (session && !session.isActive) {
+    return (
+      <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col relative overflow-hidden h-screen w-screen justify-center items-center p-12 text-center space-y-8 animate-in fade-in duration-300">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500 to-purple-650 rounded-full blur-3xl opacity-30 animate-pulse" style={{ width: "200px", height: "200px", transform: "translate(-50%, -50%)", left: "50%", top: "50%" }} />
+          <div className="relative p-8 bg-slate-900 border border-slate-800 rounded-full text-indigo-400 w-fit mx-auto shadow-2xl">
+            <Presentation className="h-16 w-16 animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-3 max-w-lg z-10">
+          <h1 className="text-4xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-indigo-200 via-slate-200 to-indigo-200">
+            Presentation Concluded
+          </h1>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Thank you for attending. The live session is now closed.
+          </p>
+        </div>
+        <div className="bg-slate-900/60 border border-slate-800 backdrop-blur-md px-6 py-3 rounded-2xl text-xs font-bold text-slate-400 flex items-center gap-2 shadow-xl z-10">
+          <Users className="h-4 w-4 text-indigo-400" />
+          <span>Room Code: {joinCode}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col relative overflow-hidden h-screen w-screen justify-center items-center">
       
-
+      {/* Fullscreen Toggle Button in Top-Left Corner */}
+      <button
+        onClick={toggleFullscreen}
+        className="absolute top-6 left-6 z-20 p-3 bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl text-slate-400 hover:text-white shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+      >
+        {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+      </button>
 
       {/* Floating Reactions Tray overlay */}
       <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">

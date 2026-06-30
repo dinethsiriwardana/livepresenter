@@ -12,7 +12,8 @@ import {
   Loader2,
   ThumbsUp,
   MessageSquare,
-  Presentation
+  Presentation,
+  Sparkles
 } from "lucide-react";
 import { 
   doc, 
@@ -67,7 +68,7 @@ export default function AudienceLivePage() {
   const [submitting, setSubmitting] = useState(false);
   
   // Q&A panel states
-  const [activeTab, setActiveTab] = useState<"presentation" | "qna">("presentation");
+  const [showQnaPopup, setShowQnaPopup] = useState(false);
   const [qnaList, setQnaList] = useState<QnaQuestion[]>([]);
   const [qnaText, setQnaText] = useState("");
 
@@ -331,197 +332,192 @@ export default function AudienceLivePage() {
     );
   }
 
+  if (!session.isActive) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-slate-950 text-slate-100 min-h-screen p-6 text-center space-y-6 animate-in fade-in duration-300">
+        <div className="relative">
+          <div className="absolute inset-0 bg-indigo-500 rounded-full blur-xl opacity-20 animate-pulse" />
+          <div className="relative p-6 bg-slate-900 border border-slate-800 rounded-3xl text-indigo-400 w-fit mx-auto shadow-2xl">
+            <Presentation className="h-10 w-10 animate-bounce" />
+          </div>
+        </div>
+        <div className="space-y-2 max-w-sm">
+          <h2 className="text-2xl font-extrabold text-slate-200">Session Ended</h2>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            The presenter has closed this live session. Thank you for your active participation and feedback!
+          </p>
+        </div>
+        <button
+          onClick={() => router.push("/")}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 px-6 rounded-xl transition-all shadow-lg shadow-indigo-600/15 active:scale-95 z-10"
+        >
+          Go back to Home
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 flex flex-col bg-slate-950 text-slate-100 min-h-screen relative overflow-hidden justify-between">
+    <div className="flex-1 flex flex-col bg-black text-slate-100 min-h-screen relative overflow-hidden justify-between">
       
-      {/* Session Top Header */}
-      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md px-6 py-4 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-1">
-            Audience Live View
+      {/* 1. Full Screen Slide Background Layer */}
+      <div className="fixed inset-0 z-0 bg-slate-950 flex items-center justify-center">
+        {activeSlide ? (
+          activeSlide.isInteractive ? (
+            <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950" />
+          ) : activeSlide.imageUrl ? (
+            <img 
+              src={activeSlide.imageUrl} 
+              alt={`Slide ${session.currentSlide}`}
+              className="w-full h-full object-contain pointer-events-none select-none"
+            />
+          ) : (
+            <div className="w-full h-full bg-slate-950" />
+          )
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-3">
+            <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+            <span className="text-xs text-slate-500">Syncing with presenter...</span>
+          </div>
+        )}
+      </div>
+
+      {/* 2. Top Header Overlay (Glassmorphism, floating) */}
+      <header className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+        <div className="flex flex-col bg-slate-950/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-900 shadow-lg pointer-events-auto">
+          <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">
+            LIVE PRESENTATION
           </span>
-          <span className="text-sm font-bold text-slate-200">
+          <span className="text-xs font-bold text-slate-200">
             Room Code: <span className="text-indigo-400 font-extrabold">{joinCode}</span>
           </span>
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-xs font-bold text-slate-350">
+        <div className="flex items-center gap-1.5 bg-slate-950/80 backdrop-blur-md border border-slate-900 px-3.5 py-2.5 rounded-2xl text-xs font-bold text-slate-350 shadow-lg pointer-events-auto">
           <Users className="h-3.5 w-3.5 text-indigo-400" />
-          {session.participantCount} users
+          <span>{session.participantCount}</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse ml-0.5" />
         </div>
       </header>
 
-      {/* Tab Selector */}
-      <div className="w-full max-w-md mx-auto px-6 pt-4 flex gap-2">
-        <button
-          onClick={() => setActiveTab("presentation")}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === "presentation"
-              ? "bg-indigo-500 border-indigo-400 text-white shadow-md shadow-indigo-500/10"
-              : "bg-slate-900 border-slate-850 text-slate-400 hover:text-slate-300"
-          }`}
-        >
-          <Presentation className="h-4 w-4" />
-          Slide View
-        </button>
-        <button
-          onClick={() => setActiveTab("qna")}
-          className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === "qna"
-              ? "bg-indigo-500 border-indigo-400 text-white shadow-md shadow-indigo-500/10"
-              : "bg-slate-900 border-slate-850 text-slate-400 hover:text-slate-300"
-          }`}
-        >
-          <MessageSquare className="h-4 w-4" />
-          Q&A Board ({qnaList.length})
-        </button>
-      </div>
-
-      {/* Main content viewport */}
-      <main className="flex-1 max-w-md w-full mx-auto px-6 py-6 flex flex-col justify-start overflow-y-auto max-h-[calc(100vh-170px)]">
-        {activeTab === "presentation" ? (
-          /* Presentation & Interactive Question tab */
-          <div className="flex-1 flex flex-col justify-start">
-            {/* Live Slide Preview Card */}
-            {activeSlide && !activeSlide.isInteractive && activeSlide.imageUrl && (
-              <div className="w-full aspect-[16/9] relative rounded-2xl overflow-hidden border border-slate-800 bg-black mb-4 shadow-lg">
-                <img 
-                  src={activeSlide.imageUrl} 
-                  alt="Live Slide Preview" 
-                  className="w-full h-full object-contain pointer-events-none select-none"
-                />
-                <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-[9px] font-bold text-slate-350 tracking-wider flex items-center gap-1.5 border border-slate-850">
-                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                  LIVE SLIDE {session.currentSlide}
-                </div>
-              </div>
-            )}
-
-            {!activeInteraction ? (
-              <div className="text-center py-12 px-6 bg-slate-900/40 backdrop-blur-sm border border-slate-850 rounded-3xl space-y-4">
-                <div className="p-4 bg-slate-950 border border-slate-900 rounded-2xl w-fit mx-auto text-indigo-505 animate-pulse">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-250">Eyes on the screen!</h3>
-                <p className="text-sm text-slate-500 font-medium">
-                  The presenter has no active questions right now. We will notify you here as soon as they trigger one.
-                </p>
-              </div>
-            ) : hasSubmitted ? (
-              <div className="bg-slate-900/40 backdrop-blur-sm border border-slate-850 rounded-3xl p-6 shadow-xl space-y-6">
-                <div className="text-center">
-                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl w-fit mx-auto text-emerald-450 mb-3">
-                    <CheckCircle className="h-6 w-6" />
+      {/* 3. Main Center Overlay (Interactive questions / results) */}
+      <main className="relative z-10 flex-1 flex items-center justify-center p-4">
+        {activeInteraction ? (
+          <div className="bg-slate-955/90 backdrop-blur-md border border-slate-850 rounded-3xl p-6 shadow-2xl max-w-md w-full overflow-y-auto max-h-[70vh] space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            {hasSubmitted ? (
+              activeInteraction.type === "wordcloud" ? (
+                <div className="text-center py-6 space-y-4">
+                  <div className="p-3 bg-indigo-500/10 border border-indigo-500/25 rounded-2xl w-fit mx-auto text-indigo-400 mb-2">
+                    <Sparkles className="h-6 w-6 animate-pulse" />
                   </div>
-                  <h3 className="text-base font-bold text-slate-200">Response Registered!</h3>
-                  <p className="text-xs text-slate-500 mt-1">Showing real-time results below</p>
+                  <h3 className="text-base font-bold text-slate-200">Word Submitted!</h3>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                    Your response has been registered. Watch the presenter's screen to see it appear live in the word cloud!
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasSubmitted(false);
+                      setTextVal("");
+                    }}
+                    className="mt-2 text-xs font-bold text-indigo-400 hover:text-indigo-300 border border-indigo-500/20 bg-indigo-500/5 hover:bg-indigo-500/10 px-4 py-2 rounded-xl transition-all"
+                  >
+                    Submit Another Word
+                  </button>
                 </div>
-
-                <div className="border-t border-slate-850 pt-4 space-y-4">
-                  {/* Results: Polls / Quizzes */}
-                  {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
-                    <div className="space-y-3">
-                      {aggregatedTallies.map((tally) => {
-                        const isCorrectAnswer = 
-                          activeInteraction.type === "quiz" && 
-                          activeInteraction.config.correctOptionIndex === tally.index;
-                        return (
-                          <div key={tally.index} className="space-y-1">
-                            <div className="flex justify-between text-xs font-semibold text-slate-400">
-                              <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
-                                {tally.option} {isCorrectAnswer && "✓"}
-                              </span>
-                              <span>{tally.count} votes ({tally.percent}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-950 border border-slate-850 rounded-full h-3 overflow-hidden">
-                              <div
-                                style={{ width: `${tally.percent}%` }}
-                                className={`h-full rounded-full transition-all duration-500 ${
-                                  isCorrectAnswer ? "bg-emerald-500" : "bg-indigo-500"
-                                }`}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
+              ) : (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl w-fit mx-auto text-emerald-450 mb-3">
+                      <CheckCircle className="h-6 w-6" />
                     </div>
-                  )}
+                    <h3 className="text-base font-bold text-slate-200">Response Registered!</h3>
+                    <p className="text-xs text-slate-505 mt-1">Showing real-time results below</p>
+                  </div>
 
-                  {/* Results: Word Cloud */}
-                  {activeInteraction.type === "wordcloud" && (
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                        Popular Words
-                      </div>
-                      <div className="flex flex-wrap gap-2 justify-center py-2 bg-slate-950/60 border border-slate-850/50 rounded-2xl p-4">
-                        {wordCloudWords.length === 0 ? (
-                          <span className="text-xs text-slate-550 italic">No words submitted...</span>
-                        ) : (
-                          wordCloudWords.map((item, idx) => (
-                            <span 
-                              key={idx} 
-                              style={{ fontSize: `${Math.max(11, Math.min(22, 11 + item.count * 2))}px` }}
-                              className="font-bold text-indigo-400 px-1"
-                            >
-                              {item.text} <span className="text-[9px] text-slate-500 font-normal">({item.count})</span>
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Results: Open Text Sticky Notes */}
-                  {activeInteraction.type === "opentext" && (
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                        Responses Feed ({responses.length})
-                      </div>
-                      <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
-                        {responses.map((note) => (
-                          <div 
-                            key={note.id} 
-                            className="bg-slate-950/50 border border-slate-850 rounded-xl p-3 text-xs text-slate-350"
-                          >
-                            <p className="leading-relaxed">"{note.value}"</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Results: Star Rating */}
-                  {activeInteraction.type === "rating" && (
-                    <div className="flex flex-col items-center justify-center py-2 gap-2 text-center">
-                      <span className="text-3xl font-extrabold text-indigo-400">
-                        {(
-                          responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
-                          Math.max(responses.length, 1)
-                        ).toFixed(1)}
-                      </span>
-                      <div className="flex gap-1 text-slate-700">
-                        {[1, 2, 3, 4, 5].map((idx) => {
-                          const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
-                          const filled = idx <= Math.round(average);
+                  <div className="border-t border-slate-900 pt-4 space-y-4">
+                    {/* Results: Polls / Quizzes */}
+                    {(activeInteraction.type === "poll" || activeInteraction.type === "quiz") && (
+                      <div className="space-y-3">
+                        {aggregatedTallies.map((tally) => {
+                          const isCorrectAnswer = 
+                            activeInteraction.type === "quiz" && 
+                            activeInteraction.config.correctOptionIndex === tally.index;
                           return (
-                            <span key={idx} className={filled ? "text-yellow-450 fill-yellow-405 text-lg" : "text-lg"}>
-                              ★
-                            </span>
+                            <div key={tally.index} className="space-y-1">
+                              <div className="flex justify-between text-xs font-semibold text-slate-400">
+                                <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
+                                  {tally.option} {isCorrectAnswer && "✓"}
+                                </span>
+                                <span>{tally.count} votes ({tally.percent}%)</span>
+                              </div>
+                              <div className="w-full bg-slate-900 border border-slate-800 rounded-full h-3 overflow-hidden">
+                                <div
+                                  style={{ width: `${tally.percent}%` }}
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    isCorrectAnswer ? "bg-emerald-500" : "bg-indigo-500"
+                                  }`}
+                                />
+                              </div>
+                            </div>
                           );
                         })}
                       </div>
-                      <span className="text-[10px] text-slate-550">{responses.length} responses</span>
-                    </div>
-                  )}
+                    )}
+
+                    {/* Results: Open Text Sticky Notes */}
+                    {activeInteraction.type === "opentext" && (
+                      <div className="space-y-2">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                          Responses Feed ({responses.length})
+                        </div>
+                        <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                          {responses.map((note) => (
+                            <div 
+                              key={note.id} 
+                              className="bg-slate-900/50 border border-slate-805 rounded-xl p-3 text-xs text-slate-350"
+                            >
+                              <p className="leading-relaxed">"{note.value}"</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Results: Star Rating */}
+                    {activeInteraction.type === "rating" && (
+                      <div className="flex flex-col items-center justify-center py-2 gap-2 text-center">
+                        <span className="text-3xl font-extrabold text-indigo-400">
+                          {(
+                            responses.reduce((acc, curr) => acc + Number(curr.value), 0) / 
+                            Math.max(responses.length, 1)
+                          ).toFixed(1)}
+                        </span>
+                        <div className="flex gap-1 text-slate-700">
+                          {[1, 2, 3, 4, 5].map((idx) => {
+                            const average = responses.reduce((acc, curr) => acc + Number(curr.value), 0) / Math.max(responses.length, 1);
+                            const filled = idx <= Math.round(average);
+                            return (
+                              <span key={idx} className={filled ? "text-yellow-450 fill-yellow-405 text-lg" : "text-lg"}>
+                                ★
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <span className="text-[10px] text-slate-555">{responses.length} responses</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )
             ) : (
-              <div className="bg-slate-900/70 border border-slate-850 rounded-3xl p-6 shadow-xl space-y-6">
+              <div className="space-y-6">
                 <div>
                   <div className="flex items-center gap-1.5 text-xs text-indigo-400 mb-2 font-bold uppercase tracking-wider">
                     {activeInteraction.type === "poll" && <BarChart2 className="h-4 w-4" />}
                     {activeInteraction.type === "quiz" && <HelpCircle className="h-4 w-4" />}
                     {activeInteraction.type === "opentext" && <Send className="h-4 w-4" />}
+                    {activeInteraction.type === "wordcloud" && <Sparkles className="h-4 w-4" />}
                     <span>Active {activeInteraction.type}</span>
                   </div>
                   <h2 className="text-lg font-bold text-slate-100">{activeInteraction.question}</h2>
@@ -561,7 +557,7 @@ export default function AudienceLivePage() {
                         <input
                           type="text"
                           maxLength={20}
-                          placeholder="Enter 1-2 words..."
+                          placeholder="Enter a word..."
                           value={textVal}
                           onChange={(e) => setTextVal(e.target.value)}
                           disabled={submitting}
@@ -620,107 +616,159 @@ export default function AudienceLivePage() {
             )}
           </div>
         ) : (
-          /* Q&A Board Tab */
-          <div className="space-y-6 flex-1 flex flex-col justify-start">
-            
-            {/* Ask Question Form */}
-            <form onSubmit={handleSubmitQuestion} className="bg-slate-900 border border-slate-850 rounded-2xl p-4 space-y-3 shadow-md">
-              <textarea
-                required
-                placeholder="Ask an anonymous question..."
-                rows={2}
-                value={qnaText}
-                onChange={(e) => setQnaText(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={!qnaText.trim()}
-                className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
-              >
-                <Send className="h-3.5 w-3.5" />
-                Post Question
-              </button>
-            </form>
-
-            {/* Questions List */}
-            <div className="space-y-3 overflow-y-auto">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                Audience Questions ({qnaList.length})
-              </div>
-              
-              {qnaList.length === 0 ? (
-                <div className="text-center py-10 text-slate-500 text-xs italic">
-                  No questions asked yet. Be the first to ask!
-                </div>
-              ) : (
-                qnaList.map((q) => {
-                  const hasUpvoted = user ? q.upvotes?.includes(user.uid) : false;
-                  
-                  return (
-                    <div 
-                      key={q.id} 
-                      className="bg-slate-900/50 border border-slate-850 rounded-2xl p-4 flex justify-between items-center gap-4 hover:border-slate-800 transition-all"
-                    >
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-slate-200 leading-snug">{q.question}</p>
-                        <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
-                          <span>Asked by {q.participantName}</span>
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleUpvoteQuestion(q.id, q.upvotes || [])}
-                        className={`flex flex-col items-center gap-0.5 border rounded-xl px-2.5 py-1.5 transition-all focus:outline-none ${
-                          hasUpvoted
-                            ? "bg-indigo-500/10 border-indigo-500 text-indigo-400 font-bold"
-                            : "bg-slate-950 border-slate-850 text-slate-550 hover:text-slate-400"
-                        }`}
-                      >
-                        <ThumbsUp className="h-3.5 w-3.5" />
-                        <span className="text-[10px]">{q.upvotes?.length || 0}</span>
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+          /* Simple overlay showing the active slide visually */
+          <div className="absolute top-20 bg-slate-950/65 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-900 text-[10px] font-semibold text-indigo-300 flex items-center gap-2 shadow-lg">
+            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-ping" />
+            <span>Slide {session.currentSlide} of Presentation</span>
           </div>
         )}
       </main>
 
-      {/* Floating Reactions Tray */}
-      <footer className="border-t border-slate-900 bg-slate-950 px-6 py-4 flex justify-around items-center sticky bottom-0 z-30">
+      {/* 4. Floating Action Controls (Bottom Right corner) */}
+      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-3">
+        {/* Q&A Popup Toggle Button */}
         <button
-          onClick={() => handleSendReaction("heart")}
-          className="p-2.5 bg-slate-900 border border-slate-850 hover:bg-slate-800 rounded-2xl transition-all hover:scale-110 text-lg"
+          onClick={() => setShowQnaPopup(true)}
+          className="relative p-3.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-indigo-400 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-1.5"
         >
-          ❤️
+          <MessageSquare className="h-5 w-5" />
+          {qnaList.length > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-indigo-650 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-slate-950">
+              {qnaList.length}
+            </span>
+          )}
         </button>
-        <button
-          onClick={() => handleSendReaction("clap")}
-          className="p-2.5 bg-slate-900 border border-slate-850 hover:bg-slate-800 rounded-2xl transition-all hover:scale-110 text-lg"
-        >
-          👏
-        </button>
-        <button
-          onClick={() => handleSendReaction("fire")}
-          className="p-2.5 bg-slate-900 border border-slate-850 hover:bg-slate-800 rounded-2xl transition-all hover:scale-110 text-lg"
-        >
-          🔥
-        </button>
-        <button
-          onClick={() => handleSendReaction("laugh")}
-          className="p-2.5 bg-slate-900 border border-slate-850 hover:bg-slate-800 rounded-2xl transition-all hover:scale-110 text-lg"
-        >
-          😂
-        </button>
-        <button
-          onClick={() => handleSendReaction("shock")}
-          className="p-2.5 bg-slate-900 border border-slate-850 hover:bg-slate-800 rounded-2xl transition-all hover:scale-110 text-lg"
-        >
-          😮
-        </button>
-      </footer>
+
+        {/* Reactions Floating Tray Control */}
+        <div className="relative group">
+          <button
+            className="p-3.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-indigo-400 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center"
+            title="Reactions"
+          >
+            <ThumbsUp className="h-5 w-5" />
+          </button>
+          
+          {/* Reaction Emojis Panel (Reveals on Hover/Focus) */}
+          <div className="absolute right-0 bottom-full mb-3 bg-slate-950/95 border border-slate-800/80 backdrop-blur-md p-2 rounded-2xl shadow-2xl flex gap-1.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all transform translate-y-2 group-hover:translate-y-0 duration-200">
+            <button
+              onClick={() => handleSendReaction("heart")}
+              className="p-2 hover:bg-slate-900 rounded-xl transition-all hover:scale-115 text-base active:scale-90"
+            >
+              ❤️
+            </button>
+            <button
+              onClick={() => handleSendReaction("clap")}
+              className="p-2 hover:bg-slate-900 rounded-xl transition-all hover:scale-115 text-base active:scale-90"
+            >
+              👏
+            </button>
+            <button
+              onClick={() => handleSendReaction("fire")}
+              className="p-2 hover:bg-slate-900 rounded-xl transition-all hover:scale-115 text-base active:scale-90"
+            >
+              🔥
+            </button>
+            <button
+              onClick={() => handleSendReaction("laugh")}
+              className="p-2 hover:bg-slate-900 rounded-xl transition-all hover:scale-115 text-base active:scale-90"
+            >
+              😂
+            </button>
+            <button
+              onClick={() => handleSendReaction("shock")}
+              className="p-2 hover:bg-slate-900 rounded-xl transition-all hover:scale-115 text-base active:scale-90"
+            >
+              😮
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Q&A Popup Modal overlay */}
+      {showQnaPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-955/95 border border-slate-850 rounded-3xl p-6 shadow-2xl max-w-md w-full max-h-[80vh] flex flex-col relative animate-in fade-in zoom-in-95 duration-200">
+            {/* Close Button */}
+            <button
+              onClick={() => setShowQnaPopup(false)}
+              className="absolute top-4 right-4 p-1.5 hover:bg-slate-900 border border-slate-900 text-slate-400 hover:text-slate-200 rounded-xl transition-all"
+            >
+              ✕
+            </button>
+
+            <h3 className="text-base font-bold text-slate-250 mb-4 flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-indigo-400" />
+              Audience Q&A Board
+            </h3>
+
+            {/* Scrollable Questions list & post area */}
+            <div className="flex-1 flex flex-col overflow-hidden gap-4">
+              
+              {/* Question list (scrollable) */}
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin">
+                <div className="text-[9px] font-bold text-slate-550 uppercase tracking-wider mb-2">
+                  Questions Feed ({qnaList.length})
+                </div>
+
+                {qnaList.length === 0 ? (
+                  <div className="text-center py-10 text-slate-500 text-xs italic">
+                    No questions asked yet. Be the first to ask!
+                  </div>
+                ) : (
+                  qnaList.map((q) => {
+                    const hasUpvoted = user ? q.upvotes?.includes(user.uid) : false;
+                    return (
+                      <div 
+                        key={q.id} 
+                        className="bg-slate-900/40 border border-slate-900 rounded-2xl p-4 flex justify-between items-center gap-4 hover:border-slate-850 transition-all"
+                      >
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold text-slate-200 leading-snug">{q.question}</p>
+                          <p className="text-[9px] text-slate-500 mt-1 flex items-center gap-1">
+                            <span>Asked by {q.participantName}</span>
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleUpvoteQuestion(q.id, q.upvotes || [])}
+                          className={`flex flex-col items-center gap-0.5 border rounded-xl px-2.5 py-1.5 transition-all focus:outline-none ${
+                            hasUpvoted
+                              ? "bg-indigo-500/10 border-indigo-500 text-indigo-400 font-bold"
+                              : "bg-slate-950 border-slate-850 text-slate-550 hover:text-slate-400"
+                          }`}
+                        >
+                          <ThumbsUp className="h-3 w-3" />
+                          <span className="text-[9px]">{q.upvotes?.length || 0}</span>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Form to submit question */}
+              <form onSubmit={handleSubmitQuestion} className="bg-slate-900/60 border border-slate-900 rounded-2xl p-3 space-y-2.5 shadow-md shrink-0">
+                <textarea
+                  required
+                  placeholder="Ask an anonymous question..."
+                  rows={2}
+                  value={qnaText}
+                  onChange={(e) => setQnaText(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-855 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-slate-200 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!qnaText.trim()}
+                  className="w-full bg-indigo-500 hover:bg-indigo-650 text-white font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Post Question
+                </button>
+              </form>
+
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

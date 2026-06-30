@@ -17,7 +17,10 @@ import {
   Loader2,
   HelpCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Maximize,
+  Minimize,
+  Sparkles
 } from "lucide-react";
 import { 
   doc, 
@@ -25,7 +28,9 @@ import {
   onSnapshot, 
   updateDoc, 
   getDoc,
-  getDocs
+  getDocs,
+  query,
+  where
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 
@@ -69,6 +74,8 @@ export default function PresenterRemotePage() {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [responses, setResponses] = useState<any[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Redirect if not logged in
   useEffect(() => {
@@ -127,6 +134,46 @@ export default function PresenterRemotePage() {
 
     return () => unsubscribe();
   }, [session?.presentationId, session?.currentSlide]);
+
+  // Listen to Responses for the active interaction
+  useEffect(() => {
+    if (!sessionId || !session?.activeInteractionId) {
+      setResponses([]);
+      return;
+    }
+
+    const responsesRef = collection(db, "sessions", sessionId, "responses");
+    const q = query(responsesRef, where("interactionId", "==", session.activeInteractionId));
+    
+    const unsubResponses = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setResponses(list);
+    });
+
+    return () => unsubResponses();
+  }, [sessionId, session?.activeInteractionId]);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => {
+        console.error("Error enabling fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   const updateSession = async (fields: Partial<Session>) => {
     if (!sessionId) return;
@@ -218,13 +265,23 @@ export default function PresenterRemotePage() {
           </div>
         </div>
 
-        <button
-          onClick={handleEndSession}
-          className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5"
-        >
-          <Square className="h-3.5 w-3.5 fill-red-405" />
-          End Session
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleFullscreen}
+            className="bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            {isFullscreen ? <Minimize className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
+            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
+          
+          <button
+            onClick={handleEndSession}
+            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            <Square className="h-3.5 w-3.5 fill-red-405" />
+            End Session
+          </button>
+        </div>
       </header>
 
       {/* Main remote dashboard split */}
@@ -245,7 +302,7 @@ export default function PresenterRemotePage() {
 
             {/* Current Slide Frame Preview */}
             <div className="aspect-[16/9] w-full max-w-lg bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-xl mb-6 relative">
-              {currentSlideData ? (
+              {currentSlideData && currentSlideData.imageUrl ? (
                 <img
                   src={currentSlideData.imageUrl}
                   alt="Current slide"
@@ -253,7 +310,7 @@ export default function PresenterRemotePage() {
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-slate-600">
-                  Loading slide preview...
+                  {currentSlideData ? "Interactive Slide" : "Loading slide preview..."}
                 </div>
               )}
             </div>
@@ -325,34 +382,112 @@ export default function PresenterRemotePage() {
                 No interaction overlays configured on this slide. Place them in the editor first.
               </div>
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {interactions.map((inter) => {
                   const isActive = session.activeInteractionId === inter.id;
                   
                   return (
-                    <button
-                      key={inter.id}
-                      onClick={() => handleToggleInteraction(inter.id)}
-                      className={`w-full flex items-center justify-between p-3.5 border rounded-2xl transition-all text-left ${
-                        isActive
-                          ? "bg-indigo-500/10 border-indigo-500 text-indigo-300 font-semibold"
-                          : "bg-slate-950/40 border-slate-850 text-slate-350 hover:border-slate-800"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 truncate">
-                        <div className={`p-1.5 rounded-lg ${isActive ? "bg-indigo-500 text-white" : "bg-slate-900 border border-slate-800 text-slate-500"}`}>
-                          {inter.type === "poll" && <BarChart2 className="h-4 w-4" />}
-                          {inter.type === "quiz" && <HelpCircle className="h-4 w-4" />}
+                    <div key={inter.id} className="space-y-2 bg-slate-950/20 p-2.5 border border-slate-900 rounded-2xl">
+                      <button
+                        onClick={() => handleToggleInteraction(inter.id)}
+                        className={`w-full flex items-center justify-between p-3 border rounded-xl transition-all text-left ${
+                          isActive
+                            ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-300 font-semibold"
+                            : "bg-slate-950/40 border-slate-850 text-slate-350 hover:border-slate-800"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 truncate">
+                          <div className={`p-1.5 rounded-lg ${isActive ? "bg-indigo-500 text-white" : "bg-slate-900 border border-slate-800 text-slate-500"}`}>
+                            {inter.type === "poll" && <BarChart2 className="h-4 w-4" />}
+                            {inter.type === "quiz" && <HelpCircle className="h-4 w-4" />}
+                            {inter.type === "wordcloud" && <Sparkles className="h-4 w-4" />}
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-slate-500 capitalize">{inter.type}</p>
+                            <p className="text-xs font-semibold truncate max-w-[150px]">{inter.question}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs text-slate-500 capitalize">{inter.type}</p>
-                          <p className="text-sm font-medium truncate max-w-[180px]">{inter.question}</p>
+                        <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-slate-900/50 border border-slate-800">
+                          {isActive ? "LIVE" : "START"}
+                        </span>
+                      </button>
+
+                      {/* Live results for Word Cloud on Presenter screen */}
+                      {isActive && inter.type === "wordcloud" && (
+                        <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">
+                              Live Words ({responses.length})
+                            </span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                          </div>
+                          {responses.length === 0 ? (
+                            <p className="text-[10px] text-slate-500 italic">Waiting for submissions...</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1 max-h-36 overflow-y-auto pr-1">
+                              {(() => {
+                                const words: Record<string, number> = {};
+                                responses.forEach(r => {
+                                  const w = String(r.value || "").trim();
+                                  if (w) words[w] = (words[w] || 0) + 1;
+                                });
+                                return Object.entries(words)
+                                  .map(([text, count]) => ({ text, count }))
+                                  .sort((a, b) => b.count - a.count)
+                                  .map((item, idx) => (
+                                    <span 
+                                      key={idx} 
+                                      className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-lg text-[10px] font-semibold flex items-center gap-1"
+                                    >
+                                      {item.text}
+                                      <span className="text-[9px] text-slate-505 font-normal">({item.count})</span>
+                                    </span>
+                                  ));
+                              })()}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-slate-900/50 border border-slate-800">
-                        {isActive ? "LIVE" : "START"}
-                      </span>
-                    </button>
+                      )}
+
+                      {/* Live results for Polls / Quizzes on Presenter screen */}
+                      {isActive && (inter.type === "poll" || inter.type === "quiz") && (
+                        <div className="bg-slate-950/60 border border-slate-900 rounded-xl p-3 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <div className="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">
+                              Live Results ({responses.length} votes)
+                            </span>
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                          </div>
+                          {responses.length === 0 ? (
+                            <p className="text-[10px] text-slate-500 italic">Waiting for votes...</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {inter.config?.options?.map((option: string, idx: number) => {
+                                const count = responses.filter(r => Number(r.value) === idx).length;
+                                const percent = responses.length > 0 ? Math.round((count / responses.length) * 100) : 0;
+                                const isCorrect = inter.type === "quiz" && inter.config.correctOptionIndex === idx;
+                                return (
+                                  <div key={idx} className="space-y-1">
+                                    <div className="flex justify-between text-[10px] text-slate-400">
+                                      <span className={`truncate max-w-[150px] ${isCorrect ? "text-emerald-400 font-bold" : ""}`}>
+                                        {option} {isCorrect && "✓"}
+                                      </span>
+                                      <span>{count} ({percent}%)</span>
+                                    </div>
+                                    <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-850/40">
+                                      <div 
+                                        style={{ width: `${percent}%` }} 
+                                        className={`h-full rounded-full ${isCorrect ? "bg-emerald-500" : "bg-indigo-500"}`} 
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
