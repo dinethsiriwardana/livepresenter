@@ -1,18 +1,33 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useRouter } from "next/navigation";
-import { Users, ArrowRight, Sparkles } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Users, ArrowRight, Sparkles, Loader2 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import Link from "next/link";
 
 export default function JoinPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 flex items-center justify-center bg-slate-950 min-h-screen">
+        <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+      </div>
+    }>
+      <JoinContent />
+    </Suspense>
+  );
+}
+
+function JoinContent() {
   const { loginAnonymously } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(() => {
+    return searchParams.get("code")?.trim().toUpperCase() || "";
+  });
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);

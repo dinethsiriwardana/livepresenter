@@ -22,7 +22,11 @@ import {
   Minimize,
   Sparkles,
   MessageSquare,
-  ThumbsUp
+  ThumbsUp,
+  Share2,
+  Copy,
+  Check,
+  X
 } from "lucide-react";
 import { 
   doc, 
@@ -85,6 +89,22 @@ export default function PresenterRemotePage() {
   const [reactions, setReactions] = useState<any[]>([]);
   const [qnaList, setQnaList] = useState<any[]>([]);
   const [showQnaOverlay, setShowQnaOverlay] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  const handleCopyLink = () => {
+    const joinUrl = `${window.location.protocol}//${window.location.host}/join?code=${sessionId}`;
+    navigator.clipboard.writeText(joinUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(sessionId);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
   // Redirect if not logged in
   useEffect(() => {
@@ -554,6 +574,16 @@ export default function PresenterRemotePage() {
             <div className="w-px h-4 bg-slate-800" />
 
             <button
+              onClick={() => setShowShareModal(true)}
+              className="p-1.5 hover:bg-slate-900 rounded-lg text-slate-400 hover:text-white transition-all"
+              title="Share Session"
+            >
+              <Share2 className="h-5 w-5" />
+            </button>
+
+            <div className="w-px h-4 bg-slate-800" />
+
+            <button
               onClick={toggleFullscreen}
               className="p-1.5 hover:bg-slate-900 rounded-lg text-slate-400 hover:text-white transition-all"
               title="Exit Fullscreen"
@@ -706,6 +736,14 @@ export default function PresenterRemotePage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowShareModal(true)}
+            className="bg-indigo-650 hover:bg-indigo-705 text-white border border-indigo-500/20 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-indigo-500/10"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            Share
+          </button>
+
           <button
             onClick={toggleFullscreen}
             className="bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5"
@@ -989,6 +1027,107 @@ export default function PresenterRemotePage() {
       </div>
         </>
       )}
+
+      {/* SHARE MODAL POPUP */}
+      <AnimatePresence>
+        {showShareModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowShareModal(false)}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+            />
+
+            {/* Modal Card */}
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl z-10 flex flex-col items-center text-center space-y-6 overflow-hidden"
+            >
+              {/* Decorative glows */}
+              <div className="absolute top-[-30%] right-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-500/10 blur-[80px] pointer-events-none" />
+              <div className="absolute bottom-[-30%] left-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-500/5 blur-[80px] pointer-events-none" />
+
+              {/* Close Button */}
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="space-y-1">
+                <h3 className="text-xl font-black bg-gradient-to-r from-white via-indigo-200 to-purple-400 bg-clip-text text-transparent flex items-center justify-center gap-2">
+                  <Share2 className="h-5 w-5 text-indigo-400" />
+                  Share Session
+                </h3>
+                <p className="text-xs text-slate-500">Invite participants to interact live</p>
+              </div>
+
+              {/* Code Display Card */}
+              <div className="w-full bg-slate-950/80 border border-slate-850 rounded-2xl p-4 flex items-center justify-between">
+                <div className="text-left">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Room Code</span>
+                  <span className="text-2xl font-black text-indigo-400 tracking-wider uppercase leading-none">{sessionId}</span>
+                </div>
+                <button
+                  onClick={handleCopyCode}
+                  className="bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  {copiedCode ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* QR Code Container */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200/10 shadow-lg shadow-black/40 flex items-center justify-center aspect-square w-52 max-w-full">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+                    typeof window !== "undefined"
+                      ? `${window.location.protocol}//${window.location.host}/join?code=${sessionId}`
+                      : `https://interactdeck.com/join?code=${sessionId}`
+                  )}`}
+                  alt="Session Join QR Code"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+
+              {/* Link Copy Input */}
+              <div className="w-full space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block text-left px-1">Join Link</span>
+                <div className="flex gap-1.5 w-full">
+                  <div className="flex-1 bg-slate-950/80 border border-slate-850 rounded-xl px-3 py-2 text-xs font-medium text-slate-400 truncate text-left select-all flex items-center">
+                    {typeof window !== "undefined"
+                      ? `${window.location.host}/join?code=${sessionId}`
+                      : `interactdeck.com/join?code=${sessionId}`}
+                  </div>
+                  <button
+                    onClick={handleCopyLink}
+                    className="bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl px-3 py-2 text-xs font-bold transition-all shadow-md shadow-indigo-500/10 flex items-center justify-center shrink-0"
+                  >
+                    {copied ? "Copied!" : "Copy URL"}
+                  </button>
+                </div>
+              </div>
+
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
