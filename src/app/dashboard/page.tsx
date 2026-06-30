@@ -95,7 +95,7 @@ export default function DashboardPage() {
       })) as Workspace[];
 
       // If no workspaces exist, create a default "Personal Workspace"
-      if (workspaceList.length === 0) {
+      if (workspaceList.length === 0 && !snapshot.metadata.fromCache) {
         try {
           const defaultWS = {
             name: "Personal Workspace",
@@ -191,16 +191,11 @@ export default function DashboardPage() {
         await updateDoc(presentationRef, { joinCode });
       }
 
-      // 3. Clear any existing responses or qna for this joinCode (in case we are reusing it)
-      const responsesRef = collection(db, "sessions", joinCode, "responses");
-      const responsesSnap = await getDocs(responsesRef);
+      // 3. Clear any existing qna for this joinCode (in case we are reusing it)
       const qnaRef = collection(db, "sessions", joinCode, "qna");
       const qnaSnap = await getDocs(qnaRef);
 
       const batch = writeBatch(db);
-      responsesSnap.docs.forEach(docSnap => {
-        batch.delete(docSnap.ref);
-      });
       qnaSnap.docs.forEach(docSnap => {
         batch.delete(docSnap.ref);
       });

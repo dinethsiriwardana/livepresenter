@@ -56,6 +56,7 @@ interface Session {
     activeQuestionId: string | null;
     timerEndsAt: any;
     showLeaderboard: boolean;
+    showCorrectAnswer?: boolean;
   };
 }
 
@@ -85,6 +86,7 @@ export default function PresenterRemotePage() {
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [responses, setResponses] = useState<any[]>([]);
+  const [allResponses, setAllResponses] = useState<any[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [reactions, setReactions] = useState<any[]>([]);
   const [qnaList, setQnaList] = useState<any[]>([]);
@@ -92,6 +94,39 @@ export default function PresenterRemotePage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  const leaderboard = React.useMemo(() => {
+    const scores: Record<string, { name: string; score: number }> = {};
+    
+    // Group responses by participant and slide to keep only the latest response
+    const latestResponses: Record<string, any> = {};
+    allResponses.forEach(r => {
+      if (!r.participantToken || !r.slideId || !r.interactionId) return;
+      const key = `${r.participantToken}_${r.slideId}_${r.interactionId}`;
+      const existing = latestResponses[key];
+      
+      const rTime = r.submittedAt?.seconds || (r.submittedAt?.toDate ? r.submittedAt.toDate().getTime() / 1000 : 0);
+      const eTime = existing ? (existing.submittedAt?.seconds || (existing.submittedAt?.toDate ? existing.submittedAt.toDate().getTime() / 1000 : 0)) : 0;
+      
+      if (!existing || rTime > eTime) {
+        latestResponses[key] = r;
+      }
+    });
+
+    // Calculate score based on only the latest responses
+    Object.values(latestResponses).forEach(r => {
+      if (!scores[r.participantToken]) {
+        scores[r.participantToken] = { name: r.participantName || "Anonymous", score: 0 };
+      }
+      if (r.isCorrect === true) {
+        scores[r.participantToken].score += 100;
+      }
+    });
+
+    return Object.values(scores)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }, [allResponses]);
 
   const handleCopyLink = () => {
     const joinUrl = `${window.location.protocol}//${window.location.host}/join?code=${sessionId}`;
@@ -166,13 +201,17 @@ export default function PresenterRemotePage() {
 
   // Listen to Responses for the active interaction
   useEffect(() => {
-    if (!sessionId || !session?.activeInteractionId) {
+    if (!sessionId || !session?.activeInteractionId || !session?.currentSlide) {
       setResponses([]);
       return;
     }
 
     const responsesRef = collection(db, "sessions", sessionId, "responses");
-    const q = query(responsesRef, where("interactionId", "==", session.activeInteractionId));
+    const q = query(
+      responsesRef, 
+      where("interactionId", "==", session.activeInteractionId),
+      where("slideId", "==", session.currentSlide.toString())
+    );
     
     const unsubResponses = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -180,7 +219,18 @@ export default function PresenterRemotePage() {
     });
 
     return () => unsubResponses();
-  }, [sessionId, session?.activeInteractionId]);
+  }, [sessionId, session?.activeInteractionId, session?.currentSlide]);
+
+  // Listen to ALL responses in the session (for leaderboard calculation)
+  useEffect(() => {
+    if (!sessionId) return;
+    const responsesRef = collection(db, "sessions", sessionId, "responses");
+    const unsubAllResponses = onSnapshot(responsesRef, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllResponses(list);
+    });
+    return () => unsubAllResponses();
+  }, [sessionId]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -322,12 +372,16 @@ export default function PresenterRemotePage() {
   };
 
   const handleClearResponses = async (interactionId: string) => {
-    if (!sessionId) return;
+    if (!sessionId || !session) return;
     if (!confirm("Are you sure you want to clear all responses for this interaction? This cannot be undone.")) return;
     
     try {
       const responsesRef = collection(db, "sessions", sessionId, "responses");
-      const q = query(responsesRef, where("interactionId", "==", interactionId));
+      const q = query(
+        responsesRef, 
+        where("interactionId", "==", interactionId),
+        where("slideId", "==", session.currentSlide.toString())
+      );
       const snap = await getDocs(q);
       
       const batch = writeBatch(db);
@@ -345,6 +399,14 @@ export default function PresenterRemotePage() {
     const currentShow = session.quizState?.showLeaderboard || false;
     updateSession({
       "quizState.showLeaderboard": !currentShow
+    } as any);
+  };
+
+  const handleToggleCorrectAnswer = () => {
+    if (!session) return;
+    const currentShow = session.quizState?.showCorrectAnswer || false;
+    updateSession({
+      "quizState.showCorrectAnswer": !currentShow
     } as any);
   };
 
@@ -387,7 +449,7 @@ export default function PresenterRemotePage() {
             <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
           )}
 
-          {/* Dynamic Spreading Word Cloud Overlay directly on top of the slide page */}
+          {/* Dynamic Spreading Word Cloud / Rating Overlay directly on top of the slide page */}
           {session.activeInteractionId && interactions.length > 0 && (
             (() => {
               const activeInter = interactions.find(i => i.id === session.activeInteractionId);
@@ -456,6 +518,384 @@ export default function PresenterRemotePage() {
                         );
                       })
                     )}
+                  </div>
+                );
+              }
+
+              if (activeInter && activeInter.type === "rating") {
+                const total = responses.length;
+                const average = total > 0 
+                  ? responses.reduce((acc, curr) => acc + Number(curr.value), 0) / total 
+                  : 0;
+
+                return (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center overflow-hidden bg-black/50 backdrop-blur-[4px] text-center">
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: "spring", stiffness: 50, damping: 15 }}
+                      className="bg-slate-900/90 border border-slate-800 p-8 rounded-3xl shadow-2xl max-w-sm w-full space-y-4"
+                    >
+                      <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-widest block">
+                        Live Rating Results
+                      </span>
+                      <h3 className="text-sm font-extrabold text-slate-300 line-clamp-2 px-4 leading-snug">
+                        {activeInter.question}
+                      </h3>
+                      
+                      <div className="py-2 space-y-1">
+                        {/* Big Rating Number */}
+                        <span className="text-7xl font-black text-indigo-400 block tracking-tight">
+                          {average.toFixed(1)}
+                        </span>
+                        
+                        {/* Gold Stars */}
+                        <div className="flex justify-center gap-1 text-slate-700">
+                          {[1, 2, 3, 4, 5].map((idx) => {
+                            const filled = idx <= Math.round(average);
+                            return (
+                              <span key={idx} className={filled ? "text-yellow-400 fill-yellow-400 text-3xl" : "text-3xl"}>
+                                ★
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <span className="text-xs text-slate-500 font-semibold block">
+                        {total} responses
+                      </span>
+                    </motion.div>
+                  </div>
+                );
+              }
+
+              if (activeInter && activeInter.type === "poll") {
+                const total = responses.length;
+                const options = activeInter.config?.options || [];
+
+                return (
+                  <div className="absolute inset-0 z-20 flex flex-col justify-between bg-slate-950/95 backdrop-blur-[8px] p-12 text-left overflow-y-auto">
+                    {/* Decorative ambient background glows */}
+                    <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/10 blur-[120px] pointer-events-none" />
+                    <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-500/10 blur-[120px] pointer-events-none" />
+                    
+                    {/* Header */}
+                    <div className="space-y-2 z-10">
+                      <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest block">
+                        Live Poll Results
+                      </span>
+                      <h3 className="text-3xl lg:text-4xl font-black text-slate-100 tracking-tight leading-tight max-w-4xl">
+                        {activeInter.question}
+                      </h3>
+                    </div>
+
+                    {/* Full screen Chart Area */}
+                    <div className="flex-1 flex flex-col justify-center gap-6 py-10 max-w-5xl w-full mx-auto z-10">
+                      {options.map((option: string, idx: number) => {
+                        const count = responses.filter(r => Number(r.value) === idx).length;
+                        const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+                        
+                        // Sleek gradient colors
+                        const barColors = [
+                          "from-indigo-500 via-indigo-600 to-indigo-700 shadow-indigo-500/20",
+                          "from-purple-500 via-purple-600 to-purple-700 shadow-purple-500/20",
+                          "from-pink-500 via-pink-600 to-pink-700 shadow-pink-500/20",
+                          "from-blue-500 via-blue-600 to-blue-700 shadow-blue-500/20",
+                          "from-teal-500 via-teal-600 to-teal-700 shadow-teal-500/20"
+                        ];
+                        const bgGradient = barColors[idx % barColors.length];
+
+                        return (
+                          <div key={idx} className="space-y-2">
+                            {/* Option Label and Count Info */}
+                            <div className="flex justify-between items-end text-sm lg:text-base font-extrabold">
+                              <span className="text-slate-300 truncate max-w-[75%] leading-none pb-0.5">
+                                {option}
+                              </span>
+                              <span className="text-indigo-300 shrink-0 bg-slate-900 border border-slate-800 px-3 py-1 rounded-xl shadow-inner font-mono text-xs">
+                                {count} votes ({percent}%)
+                              </span>
+                            </div>
+                            
+                            {/* Giant Animated Bar */}
+                            <div className="w-full bg-slate-900/60 h-10 rounded-2xl overflow-hidden border border-slate-800 p-1 flex items-center shadow-inner">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${percent}%` }}
+                                transition={{ type: "spring", stiffness: 40, damping: 10, delay: idx * 0.05 }}
+                                className={`h-full rounded-xl bg-gradient-to-r ${bgGradient} shadow-lg`}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer Info */}
+                    <div className="flex justify-between items-center text-xs text-slate-500 border-t border-slate-900/80 pt-6 z-10 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Broadcasting live results</span>
+                      </div>
+                      <span>Total Submissions: {total} responses</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (activeInter && activeInter.type === "quiz") {
+                const total = responses.length;
+                const options = activeInter.config?.options || [];
+                const correctIdx = activeInter.config?.correctOptionIndex;
+                const showLeaderboard = session.quizState?.showLeaderboard || false;
+
+                return (
+                  <div className="absolute inset-0 z-20 flex flex-col justify-between bg-slate-950/95 backdrop-blur-[8px] p-12 text-left overflow-y-auto">
+                    {/* Decorative ambient background glows */}
+                    <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/10 blur-[120px] pointer-events-none" />
+                    <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-500/10 blur-[120px] pointer-events-none" />
+                    
+                    {/* Header */}
+                    <div className="space-y-2 z-10">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">
+                          Live Quiz Results
+                        </span>
+                        {showLeaderboard && (
+                          <>
+                            <span className="text-slate-700 font-bold">•</span>
+                            <span className="text-xs font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                              <Award className="h-3 w-3" /> Standings Active
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <h3 className="text-3xl lg:text-4xl font-black text-slate-100 tracking-tight leading-tight max-w-4xl">
+                        {activeInter.question}
+                      </h3>
+                    </div>
+
+                    {/* Main Split Layout */}
+                    <div className="flex-1 flex flex-col lg:flex-row gap-12 py-8 items-stretch w-full mx-auto z-10">
+                      
+                      {/* Left: Quiz Chart */}
+                      <div className="flex-1 flex flex-col justify-center gap-5">
+                        {options.map((option: string, idx: number) => {
+                          const count = responses.filter(r => Number(r.value) === idx).length;
+                          const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+                          const isCorrect = idx === correctIdx;
+                          const revealCorrect = session.quizState?.showCorrectAnswer || false;
+                          const showAsCorrect = isCorrect && revealCorrect;
+                          const showAsIncorrect = !isCorrect && revealCorrect && count > 0;
+                          
+                          // Style gradient: Green for correct, Red for incorrect (with votes), standard purple/blue gradient otherwise
+                          const bgGradient = showAsCorrect
+                            ? "from-emerald-500 via-emerald-600 to-emerald-700 shadow-emerald-500/20"
+                            : showAsIncorrect
+                              ? "from-red-500 via-red-600 to-red-700 shadow-red-500/20"
+                              : "from-indigo-550 via-indigo-600 to-indigo-700 shadow-indigo-500/10";
+
+                          return (
+                            <div key={idx} className="space-y-1.5">
+                              {/* Option Label and Count Info */}
+                              <div className="flex justify-between items-end text-sm font-extrabold">
+                                <span className={`flex items-center gap-2 truncate max-w-[75%] leading-none pb-0.5 ${
+                                  showAsCorrect 
+                                    ? "text-emerald-400 font-black" 
+                                    : showAsIncorrect
+                                      ? "text-red-400 font-black"
+                                      : "text-slate-350"
+                                }`}>
+                                  {showAsCorrect && <Check className="h-4 w-4 text-emerald-400 shrink-0" />}
+                                  {showAsIncorrect && <X className="h-4 w-4 text-red-400 shrink-0" />}
+                                  {option}
+                                </span>
+                                <span className={`shrink-0 border px-3 py-1 rounded-xl shadow-inner font-mono text-xs ${
+                                  showAsCorrect 
+                                    ? "bg-emerald-950/40 border-emerald-800 text-emerald-400" 
+                                    : showAsIncorrect
+                                      ? "bg-red-950/40 border-red-800 text-red-400"
+                                      : "bg-slate-900 border-slate-800 text-slate-400"
+                                }`}>
+                                  {count} votes ({percent}%)
+                                </span>
+                              </div>
+                              
+                              {/* Bar */}
+                              <div className={`w-full bg-slate-900/60 h-8 rounded-2xl overflow-hidden border p-1 flex items-center shadow-inner ${
+                                showAsCorrect 
+                                  ? "border-emerald-500/30" 
+                                  : showAsIncorrect
+                                    ? "border-red-500/30"
+                                    : "border-slate-800"
+                              }`}>
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${percent}%` }}
+                                  transition={{ type: "spring", stiffness: 40, damping: 10, delay: idx * 0.05 }}
+                                  className={`h-full rounded-xl bg-gradient-to-r ${bgGradient} shadow-lg`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right: Leaderboard Standings (only if showLeaderboard is true) */}
+                      {showLeaderboard && (
+                        <motion.div
+                          initial={{ opacity: 0, x: 50, scale: 0.95 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          transition={{ type: "spring", stiffness: 70, damping: 15 }}
+                          className="w-full lg:w-96 bg-slate-900/40 border border-slate-850 p-6 rounded-3xl flex flex-col gap-6 shrink-0 relative overflow-hidden"
+                        >
+                          <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 blur-[35px] pointer-events-none rounded-full" />
+                          
+                          <div className="border-b border-slate-850/80 pb-3 flex items-center gap-2">
+                            <Award className="h-5 w-5 text-amber-400" />
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                              Leaderboard Standings
+                            </h4>
+                          </div>
+
+                          {leaderboard.length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-2">
+                              <Award className="h-8 w-8 text-slate-700 animate-pulse" />
+                              <p className="text-xs text-slate-500 italic">No correct submissions yet.</p>
+                            </div>
+                          ) : (
+                            <div className="flex-1 flex flex-col justify-center gap-3">
+                              {leaderboard.map((player: any, idx: number) => {
+                                const medals = ["🥇", "🥈", "🥉"];
+                                return (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: idx * 0.1 }}
+                                    key={idx}
+                                    className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                                      idx === 0 
+                                        ? "bg-amber-500/10 border-amber-500/30 text-amber-300 shadow-md shadow-amber-500/5" 
+                                        : "bg-slate-950/40 border-slate-850 text-slate-300"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="text-base font-bold w-6 shrink-0 text-center">
+                                        {idx < 3 ? medals[idx] : `${idx + 1}`}
+                                      </span>
+                                      <span className="text-xs font-black truncate max-w-[140px]">
+                                        {player.name}
+                                      </span>
+                                    </div>
+                                    <span className="font-mono text-xs font-extrabold text-indigo-400 bg-indigo-500/5 border border-indigo-500/15 px-2.5 py-0.5 rounded-lg">
+                                      {player.score} pts
+                                    </span>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+
+                    </div>
+
+                    {/* Footer Info */}
+                    <div className="flex justify-between items-center text-xs text-slate-500 border-t border-slate-900/80 pt-6 z-10 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Broadcasting live results</span>
+                      </div>
+                      <span>Total Submissions: {total} responses</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (activeInter && activeInter.type === "opentext") {
+                const total = responses.length;
+
+                return (
+                  <div className="absolute inset-0 z-20 flex flex-col justify-between bg-slate-955/95 backdrop-blur-[8px] p-12 text-left overflow-y-auto">
+                    {/* Decorative ambient background glows */}
+                    <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/10 blur-[120px] pointer-events-none" />
+                    <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-purple-500/10 blur-[120px] pointer-events-none" />
+
+                    {/* Header */}
+                    <div className="space-y-2 z-10">
+                      <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest block">
+                        Live Audience Responses
+                      </span>
+                      <h3 className="text-3xl lg:text-4xl font-black text-slate-100 tracking-tight leading-tight max-w-4xl">
+                        {activeInter.question}
+                      </h3>
+                    </div>
+
+                    {/* Main Content Area - Grid of Sticky Notes */}
+                    <div className="flex-1 py-10 z-10">
+                      {responses.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4">
+                          <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-full animate-pulse">
+                            <MessageSquare className="h-10 w-10 text-indigo-400" />
+                          </div>
+                          <div>
+                            <p className="text-slate-200 font-bold">Waiting for responses...</p>
+                            <p className="text-xs text-slate-500 max-w-xs mt-1">Submit your thoughts on your phone to see them posted here live!</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 max-w-7xl mx-auto items-start">
+                          <AnimatePresence>
+                            {responses.map((note: any, idx: number) => {
+                              // Nice gradient left borders for cards
+                              const borders = [
+                                "border-l-indigo-500",
+                                "border-l-purple-500",
+                                "border-l-pink-500",
+                                "border-l-blue-500",
+                                "border-l-teal-500",
+                                "border-l-amber-500"
+                              ];
+                              const leftBorder = borders[idx % borders.length];
+
+                              return (
+                                <motion.div
+                                  key={note.id}
+                                  initial={{ opacity: 0, y: 30, scale: 0.9 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, scale: 0.9 }}
+                                  transition={{ type: "spring", stiffness: 80, damping: 14, delay: (idx % 10) * 0.05 }}
+                                  className={`bg-slate-900/60 border border-slate-800 border-l-4 ${leftBorder} rounded-2xl p-5 shadow-lg relative overflow-hidden backdrop-blur-sm group hover:border-slate-700/80 hover:bg-slate-900/80 transition-all duration-200`}
+                                >
+                                  <div className="absolute top-0 right-0 w-16 h-16 bg-white/[0.01] rounded-bl-full pointer-events-none" />
+                                  <p className="text-slate-200 text-sm font-medium leading-relaxed italic pr-2">
+                                    "{note.value}"
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-850/60">
+                                    <div className="h-6 w-6 rounded-full bg-slate-800 border border-slate-750 flex items-center justify-center text-[10px] font-bold text-indigo-400 capitalize">
+                                      {note.participantName ? note.participantName.charAt(0) : "A"}
+                                    </div>
+                                    <span className="text-[10px] text-slate-505 font-extrabold truncate">
+                                      {note.participantName || "Anonymous"}
+                                    </span>
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </AnimatePresence>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer Info */}
+                    <div className="flex justify-between items-center text-xs text-slate-500 border-t border-slate-900/80 pt-6 z-10 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Broadcasting responses feed</span>
+                      </div>
+                      <span>Total Submissions: {total} responses</span>
+                    </div>
                   </div>
                 );
               }
@@ -544,13 +984,27 @@ export default function PresenterRemotePage() {
                       {isActive ? (status === "active" ? "Stop Interaction" : "Hide Results") : `Start ${slideInter.type}`}
                     </button>
 
-                    {isActive && status === "stopped" && (
+                    {isActive && (
                       <button
                         onClick={() => handleClearResponses(slideInter.id)}
-                        className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 rounded-xl px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
+                        className="bg-red-500/10 hover:bg-red-550/20 text-red-400 border border-red-500/20 rounded-xl px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5"
                       >
-                        <Trash2 className="h-3.5 w-3.5 animate-pulse" />
+                        <Trash2 className="h-3.5 w-3.5" />
                         Clear Responses
+                      </button>
+                    )}
+
+                    {slideInter.type === "quiz" && isActive && (
+                      <button
+                        onClick={handleToggleCorrectAnswer}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 ${
+                          session.quizState?.showCorrectAnswer
+                            ? "bg-emerald-500/15 border-emerald-500 text-emerald-400 font-extrabold"
+                            : "bg-slate-800 border-slate-700 text-slate-350 hover:bg-slate-700"
+                        }`}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {session.quizState?.showCorrectAnswer ? "Correct Answer: Shown" : "Correct Answer: Hidden"}
                       </button>
                     )}
                   </div>
@@ -596,7 +1050,7 @@ export default function PresenterRemotePage() {
           {session.activeInteractionId && interactions.length > 0 && (
             (() => {
               const activeInter = interactions.find(i => i.id === session.activeInteractionId);
-              if (!activeInter || activeInter.type === "wordcloud") return null;
+              if (!activeInter || activeInter.type === "wordcloud" || activeInter.type === "rating" || activeInter.type === "poll" || activeInter.type === "quiz" || activeInter.type === "opentext") return null;
               return (
                 <div className="absolute right-6 top-6 bottom-24 w-80 z-30 bg-slate-955/90 backdrop-blur-md border border-slate-850 rounded-3xl p-5 shadow-2xl flex flex-col justify-center gap-4 text-left animate-in fade-in slide-in-from-right-4 duration-200">
                   <div>
@@ -807,7 +1261,73 @@ export default function PresenterRemotePage() {
 
       {/* Main remote dashboard split */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Control Column (60% width) */}
+        {/* Left Slide list Sidebar (20% width) */}
+        <aside className="hidden md:flex w-56 border-r border-slate-900 bg-slate-950/40 flex-col p-4 gap-3 select-none shrink-0">
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            Slides List ({slides.length})
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin">
+            {slides.map((slide, index) => {
+              const isActive = session.currentSlide === index + 1;
+              return (
+                <button
+                  key={slide.id}
+                  onClick={() => {
+                    const autoInteractId = (slide && slide.isInteractive) ? "primary" : null;
+                    updateSession({ currentSlide: index + 1, activeInteractionId: autoInteractId });
+                  }}
+                  className={`w-full relative rounded-xl border overflow-hidden transition-all text-left group ${
+                    isActive
+                      ? "border-indigo-500 shadow-md shadow-indigo-500/10 bg-indigo-500/5"
+                      : "border-slate-850 hover:border-slate-800 bg-slate-900/10"
+                  }`}
+                >
+                  <div className="aspect-[16/9] w-full bg-slate-950 relative">
+                    {slide.thumbnailUrl ? (
+                      <img
+                        src={slide.thumbnailUrl}
+                        alt={`Slide ${index + 1}`}
+                        className="w-full h-full object-contain pointer-events-none"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-slate-900 to-indigo-950 flex flex-col items-center justify-center text-[10px] text-slate-400 font-bold p-2 text-center">
+                        {slide.isInteractive && (
+                          <div className="flex flex-col items-center gap-1">
+                            <Sparkles className="h-4 w-4 text-indigo-400 animate-pulse" />
+                            <span className="capitalize">{slide.interactionType}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Slide Number Badge */}
+                    <div className="absolute bottom-1.5 left-1.5 h-4 px-1.5 bg-black/60 backdrop-blur-sm rounded flex items-center justify-center text-[9px] font-semibold text-slate-300">
+                      {index + 1}
+                    </div>
+
+                    {/* Interactive Badge (Top Right) */}
+                    {slide.isInteractive && (
+                      <div className="absolute top-1.5 right-1.5 h-4 w-4 bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-md">
+                        <Sparkles className="h-2.5 w-2.5" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Slide details / title or question snippet */}
+                  <div className="p-2 border-t border-slate-900 bg-slate-950/20">
+                    <p className="text-[10px] text-slate-400 truncate font-semibold">
+                      {slide.isInteractive 
+                        ? slide.notes ? slide.notes.replace(/^Interactive \w+:\s*/i, "") : "Interactive Slide"
+                        : `Slide ${index + 1}`}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        {/* Center Control Column (remaining space) */}
         <main className="flex-1 flex flex-col p-6 overflow-y-auto gap-6 border-r border-slate-900">
           
           {/* Main Slide Navigation Controller */}
@@ -854,32 +1374,6 @@ export default function PresenterRemotePage() {
                 Next
                 <ChevronRight className="h-5 w-5" />
               </button>
-            </div>
-          </div>
-
-          {/* Quick Slide Jump Select Panel */}
-          <div className="bg-slate-900/40 border border-slate-850 rounded-3xl p-6">
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-              Jump directly to slide
-            </div>
-            <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-2">
-              {slides.map((s, idx) => (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    const targetSlide = slides[idx];
-                    const autoInteractId = (targetSlide && targetSlide.isInteractive) ? "primary" : null;
-                    updateSession({ currentSlide: idx + 1, activeInteractionId: autoInteractId });
-                  }}
-                  className={`aspect-square rounded-xl text-xs font-extrabold transition-all border flex items-center justify-center ${
-                    session.currentSlide === idx + 1
-                      ? "bg-indigo-500 text-white border-indigo-400"
-                      : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
-                  }`}
-                >
-                  {idx + 1}
-                </button>
-              ))}
             </div>
           </div>
         </main>
@@ -992,7 +1486,8 @@ export default function PresenterRemotePage() {
                               {inter.config?.options?.map((option: string, idx: number) => {
                                 const count = responses.filter(r => Number(r.value) === idx).length;
                                 const percent = responses.length > 0 ? Math.round((count / responses.length) * 100) : 0;
-                                const isCorrect = inter.type === "quiz" && inter.config.correctOptionIndex === idx;
+                                const revealCorrect = session.quizState?.showCorrectAnswer || false;
+                                const isCorrect = inter.type === "quiz" && revealCorrect && inter.config.correctOptionIndex === idx;
                                 return (
                                   <div key={idx} className="space-y-1">
                                     <div className="flex justify-between text-[10px] text-slate-400">
@@ -1010,6 +1505,23 @@ export default function PresenterRemotePage() {
                                   </div>
                                 );
                               })}
+
+                              {inter.type === "quiz" && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleCorrectAnswer();
+                                  }}
+                                  className={`w-full mt-2 py-2 px-3 border rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                                    session.quizState?.showCorrectAnswer
+                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                      : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850"
+                                  }`}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  {session.quizState?.showCorrectAnswer ? "Hide Correct Answer" : "Reveal Correct Answer"}
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1072,18 +1584,16 @@ export default function PresenterRemotePage() {
                           </div>
                         </div>
                       )}
-                      {isActive && session.interactionStatus === "stopped" && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleClearResponses(inter.id);
-                          }}
-                          className="w-full mt-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 rounded-xl py-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 animate-in fade-in zoom-in-95 duration-200"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 animate-pulse" />
-                          Clear Responses
-                        </button>
-                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearResponses(inter.id);
+                        }}
+                        className="w-full mt-2 bg-red-500/10 hover:bg-red-550/20 text-red-400 border border-red-500/20 rounded-xl py-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Clear Responses
+                      </button>
                     </div>
                   );
                 })}

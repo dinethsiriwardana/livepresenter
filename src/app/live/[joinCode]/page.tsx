@@ -39,6 +39,12 @@ interface Session {
   activeInteractionId: string | null;
   interactionStatus?: "active" | "stopped" | null;
   participantCount: number;
+  quizState?: {
+    activeQuestionId: string | null;
+    timerEndsAt: any;
+    showLeaderboard: boolean;
+    showCorrectAnswer?: boolean;
+  };
 }
 
 interface Interaction {
@@ -151,6 +157,7 @@ export default function AudienceLivePage() {
           const q = query(
             collection(db, "sessions", joinCode, "responses"),
             where("interactionId", "==", session.activeInteractionId),
+            where("slideId", "==", session.currentSlide.toString()),
             where("participantToken", "==", user.uid)
           );
           const snap = await getDocs(q);
@@ -185,13 +192,17 @@ export default function AudienceLivePage() {
 
   // Listen to Responses for the active interaction
   useEffect(() => {
-    if (!joinCode || !session?.activeInteractionId) {
+    if (!joinCode || !session?.activeInteractionId || !session?.currentSlide) {
       setResponses([]);
       return;
     }
 
     const responsesRef = collection(db, "sessions", joinCode, "responses");
-    const q = query(responsesRef, where("interactionId", "==", session.activeInteractionId));
+    const q = query(
+      responsesRef, 
+      where("interactionId", "==", session.activeInteractionId),
+      where("slideId", "==", session.currentSlide.toString())
+    );
     
     const unsubResponses = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -199,7 +210,7 @@ export default function AudienceLivePage() {
     });
 
     return () => unsubResponses();
-  }, [joinCode, session?.activeInteractionId]);
+  }, [joinCode, session?.activeInteractionId, session?.currentSlide]);
 
   // Compute tallies and word frequency
   const aggregatedTallies = React.useMemo(() => {
@@ -262,6 +273,7 @@ export default function AudienceLivePage() {
 
       await addDoc(responsesRef, {
         interactionId: activeInteraction.id,
+        slideId: session.currentSlide.toString(),
         participantToken: user.uid,
         participantName,
         value,
@@ -434,8 +446,47 @@ export default function AudienceLivePage() {
                       <CheckCircle className="h-6 w-6" />
                     </div>
                     <h3 className="text-base font-bold text-slate-200">Response Registered!</h3>
-                    <p className="text-xs text-slate-505 mt-1">Showing real-time results below</p>
+                    <p className="text-xs text-slate-500 mt-1">Showing real-time results below</p>
                   </div>
+
+                  {/* Correct / Incorrect Status Card for Quiz */}
+                  {activeInteraction.type === "quiz" && session?.quizState?.showCorrectAnswer && (() => {
+                    const myResponse = responses.find(r => r.participantToken === user?.uid);
+                    if (!myResponse) return null;
+                    const isCorrect = myResponse.isCorrect === true;
+                    
+                    const correctIdx = activeInteraction.config?.correctOptionIndex;
+                    const correctOptionText = activeInteraction.config?.options?.[correctIdx] || "Correct Option";
+                    const myOptionText = activeInteraction.config?.options?.[myResponse.value] || "Your Option";
+
+                    return (
+                      <div className={`p-4 rounded-2xl border text-center space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 ${
+                        isCorrect 
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-450" 
+                          : "bg-red-500/10 border-red-500/20 text-red-400"
+                      }`}>
+                        <div className="flex items-center justify-center gap-2 font-black text-sm">
+                          {isCorrect ? (
+                            <>
+                              <span className="text-xl">🎉</span>
+                              <span>Correct Answer! (+100 pts)</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xl">❌</span>
+                              <span>Incorrect Answer</span>
+                            </>
+                          )}
+                        </div>
+                        {!isCorrect && (
+                          <p className="text-[10px] text-slate-500 font-medium">
+                            You chose <span className="text-red-450 font-bold">"{myOptionText}"</span>. 
+                            The correct answer is <span className="text-emerald-450 font-bold">"{correctOptionText}"</span>.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="border-t border-slate-900 pt-4 space-y-4">
                     {/* Results: Polls / Quizzes */}
@@ -444,12 +495,25 @@ export default function AudienceLivePage() {
                         {aggregatedTallies.map((tally) => {
                           const isCorrectAnswer = 
                             activeInteraction.type === "quiz" && 
+                            session?.quizState?.showCorrectAnswer && 
                             activeInteraction.config.correctOptionIndex === tally.index;
+                          
+                          const isIncorrectAnswer = 
+                            activeInteraction.type === "quiz" && 
+                            session?.quizState?.showCorrectAnswer && 
+                            !isCorrectAnswer && 
+                            tally.count > 0;
                           return (
                             <div key={tally.index} className="space-y-1">
                               <div className="flex justify-between text-xs font-semibold text-slate-400">
-                                <span className={isCorrectAnswer ? "text-emerald-400 font-bold" : ""}>
-                                  {tally.option} {isCorrectAnswer && "✓"}
+                                <span className={
+                                  isCorrectAnswer 
+                                    ? "text-emerald-400 font-bold" 
+                                    : isIncorrectAnswer 
+                                      ? "text-red-400 font-bold" 
+                                      : ""
+                                }>
+                                  {tally.option} {isCorrectAnswer && "✓"} {isIncorrectAnswer && "✗"}
                                 </span>
                                 <span>{tally.count} votes ({tally.percent}%)</span>
                               </div>
@@ -457,7 +521,11 @@ export default function AudienceLivePage() {
                                 <div
                                   style={{ width: `${tally.percent}%` }}
                                   className={`h-full rounded-full transition-all duration-500 ${
-                                    isCorrectAnswer ? "bg-emerald-500" : "bg-indigo-500"
+                                    isCorrectAnswer 
+                                      ? "bg-emerald-500" 
+                                      : isIncorrectAnswer 
+                                        ? "bg-red-500" 
+                                        : "bg-indigo-500"
                                   }`}
                                 />
                               </div>

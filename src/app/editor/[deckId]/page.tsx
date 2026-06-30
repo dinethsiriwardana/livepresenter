@@ -108,6 +108,7 @@ export default function SlideEditorPage() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isReordering, setIsReordering] = useState(false);
+  const isReorderingRef = useRef(false);
 
   const handleAddSlide = async () => {
     if (newSlideType === "content" && !newSlideImage) {
@@ -263,7 +264,7 @@ export default function SlideEditorPage() {
   };
 
   const handleReorder = async (startIndex: number, endIndex: number) => {
-    if (isReordering) return;
+    if (isReorderingRef.current) return;
     if (
       startIndex === endIndex || 
       startIndex < 0 || 
@@ -272,6 +273,7 @@ export default function SlideEditorPage() {
       endIndex >= slides.length
     ) return;
     
+    isReorderingRef.current = true;
     setIsReordering(true);
     
     // 1. Optimistic UI update
@@ -348,6 +350,7 @@ export default function SlideEditorPage() {
       alert("Failed to save slide order: " + err.message);
       setSlides(slides); // Revert optimistic update
     } finally {
+      isReorderingRef.current = false;
       setIsReordering(false);
     }
   };
