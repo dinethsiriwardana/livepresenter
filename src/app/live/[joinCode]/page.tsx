@@ -13,7 +13,8 @@ import {
   ThumbsUp,
   MessageSquare,
   Presentation,
-  Sparkles
+  Sparkles,
+  Square
 } from "lucide-react";
 import { 
   doc, 
@@ -36,6 +37,7 @@ interface Session {
   isActive: boolean;
   currentSlide: number;
   activeInteractionId: string | null;
+  interactionStatus?: "active" | "stopped" | null;
   participantCount: number;
 }
 
@@ -510,6 +512,16 @@ export default function AudienceLivePage() {
                   </div>
                 </div>
               )
+            ) : session.interactionStatus === "stopped" ? (
+              <div className="text-center py-8 px-4 space-y-4">
+                <div className="p-3 bg-red-500/10 border border-red-500/25 rounded-2xl w-fit mx-auto text-red-400 mb-2">
+                  <Square className="h-6 w-6 fill-red-400/20" />
+                </div>
+                <h3 className="text-base font-bold text-slate-200">Submissions Closed</h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                  The presenter has closed submissions for this question. Keep an eye on the presentation screen for results!
+                </p>
+              </div>
             ) : (
               <div className="space-y-6">
                 <div>

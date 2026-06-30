@@ -367,7 +367,7 @@ export default function ProjectorCastPage() {
         >
           {/* 1. LEFT PANEL: SLIDE IMAGE (Shown if NOT standalone interactive slide) */}
           {!activeSlide.isInteractive && (
-            <div className={`relative bg-black flex items-center justify-center transition-all duration-300 ${activeInteraction ? "w-1/2 border-r border-slate-900" : "w-full h-full"}`}>
+            <div className={`relative bg-black flex items-center justify-center transition-all duration-300 ${activeInteraction && activeInteraction.type !== "wordcloud" ? "w-1/2 border-r border-slate-900" : "w-full h-full"}`}>
               <img
                 src={activeSlide.imageUrl}
                 alt="Current Slide View"
@@ -385,11 +385,69 @@ export default function ProjectorCastPage() {
                   }}
                 />
               )}
+
+              {/* Dynamic Spreading Word Cloud Overlay directly on top of the slide page */}
+              {activeInteraction && activeInteraction.type === "wordcloud" && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center overflow-hidden bg-black/45 backdrop-blur-[2px]">
+                  {wordCloudWords.length === 0 ? (
+                    <div className="text-center space-y-2">
+                      <Sparkles className="h-8 w-8 text-indigo-400 animate-pulse mx-auto" />
+                      <span className="text-xs text-slate-500 italic block">Waiting for words...</span>
+                    </div>
+                  ) : (
+                    wordCloudWords.map((item, idx) => {
+                      const maxCount = wordCloudWords[0]?.count || 1;
+                      const minSize = 16;
+                      const maxSize = 64; // Responsive, massive font size
+                      const size = minSize + (item.count / maxCount) * (maxSize - minSize);
+                      
+                      // Spiral distribution angles spreading from the middle
+                      const angle = (idx * 137.5) * (Math.PI / 180);
+                      const radius = Math.sqrt(idx + 1) * 85; 
+                      const tx = Math.cos(angle) * radius;
+                      const ty = Math.sin(angle) * radius;
+                      
+                      const colors = [
+                        "text-indigo-350", 
+                        "text-purple-300", 
+                        "text-pink-300", 
+                        "text-blue-300", 
+                        "text-teal-300", 
+                        "text-yellow-200", 
+                        "text-emerald-300",
+                        "text-rose-300 font-extrabold"
+                      ];
+                      const colorClass = colors[idx % colors.length];
+
+                      return (
+                        <motion.span
+                          key={idx}
+                          initial={{ scale: 0, opacity: 0, x: 0, y: 0 }}
+                          animate={{ scale: 1, opacity: 1, x: tx, y: ty }}
+                          transition={{ 
+                            type: "spring", 
+                            stiffness: 45, 
+                            damping: 12,
+                            delay: idx * 0.03 
+                          }}
+                          style={{ 
+                            fontSize: `${size}px`,
+                            position: "absolute"
+                          }}
+                          className={`font-black tracking-tight select-none leading-none text-center filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${colorClass}`}
+                        >
+                          {item.text}
+                        </motion.span>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {/* 2. RIGHT PANEL (OR FULLSCREEN): INTERACTION RESULTS */}
-          {activeInteraction && (
+          {activeInteraction && activeInteraction.type !== "wordcloud" && (
             <div
               className={`flex flex-col justify-center p-8 bg-slate-950/85 backdrop-blur-xl ${
                 activeSlide.isInteractive
@@ -401,7 +459,6 @@ export default function ProjectorCastPage() {
                 <div className="flex items-center gap-2 mb-2 text-indigo-400">
                   {activeInteraction.type === "poll" && <BarChart2 className="h-5 w-5" />}
                   {activeInteraction.type === "quiz" && <HelpCircle className="h-5 w-5" />}
-                  {activeInteraction.type === "wordcloud" && <Sparkles className="h-5 w-5 animate-pulse" />}
                   {activeInteraction.type === "opentext" && <MessageSquare className="h-5 w-5" />}
                   {activeInteraction.type === "rating" && <Star className="h-5 w-5 text-yellow-450 fill-yellow-450" />}
                   <span className="text-[10px] font-bold tracking-widest uppercase">{activeInteraction.type}</span>
@@ -436,54 +493,13 @@ export default function ProjectorCastPage() {
                               className={`h-full rounded-full ${
                                 isCorrectAnswer
                                   ? "bg-emerald-500"
-                                  : "bg-gradient-to-r from-indigo-500 to-purple-600"
+                                  : "bg-gradient-to-r from-indigo-500 to-purple-650"
                               }`}
                             />
                           </div>
                         </div>
                       );
                     })}
-                  </div>
-                )}
-
-                {/* 2. SPARKING WORD CLOUDS (Golden Spiral Distribution) */}
-                {activeInteraction.type === "wordcloud" && (
-                  <div className="h-72 w-full relative flex items-center justify-center overflow-hidden">
-                    {wordCloudWords.length === 0 ? (
-                      <span className="text-xs text-slate-500 italic">Waiting for words...</span>
-                    ) : (
-                      wordCloudWords.map((item, idx) => {
-                        const maxCount = wordCloudWords[0]?.count || 1;
-                        const minSize = 12;
-                        const maxSize = 42;
-                        const size = minSize + (item.count / maxCount) * (maxSize - minSize);
-                        
-                        // Golden spiral distribution angles
-                        const angle = (idx * 137.5) * (Math.PI / 180);
-                        const radius = Math.sqrt(idx) * (activeSlide.isInteractive ? 40 : 25);
-                        const tx = Math.cos(angle) * radius;
-                        const ty = Math.sin(angle) * radius;
-                        
-                        const colors = ["text-indigo-400", "text-purple-400", "text-pink-400", "text-blue-400", "text-teal-400"];
-                        const colorClass = colors[idx % colors.length];
-
-                        return (
-                          <motion.span
-                            key={idx}
-                            initial={{ scale: 0, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1, x: tx, y: ty }}
-                            transition={{ type: "spring", stiffness: 80, delay: idx * 0.04 }}
-                            style={{ 
-                              fontSize: `${size}px`,
-                              position: "absolute"
-                            }}
-                            className={`font-extrabold tracking-tight select-none leading-none drop-shadow ${colorClass}`}
-                          >
-                            {item.text}
-                          </motion.span>
-                        );
-                      })
-                    )}
                   </div>
                 )}
 
@@ -500,7 +516,7 @@ export default function ProjectorCastPage() {
                           key={note.id} 
                           initial={{ scale: 0.9, opacity: 0 }}
                           animate={{ scale: 1, opacity: 1 }}
-                          className="bg-slate-900 border border-slate-850 rounded-2xl p-4 shadow-lg border-l-4 border-l-indigo-500 text-xs text-slate-200"
+                          className="bg-slate-900 border border-slate-855 rounded-2xl p-4 shadow-lg border-l-4 border-l-indigo-500 text-xs text-slate-200"
                         >
                           <p className="leading-relaxed mb-2 font-medium">"{note.value}"</p>
                           <p className="text-[10px] text-slate-500 text-right">- {note.participantName}</p>
